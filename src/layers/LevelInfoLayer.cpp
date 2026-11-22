@@ -6,6 +6,8 @@
 #include "utils.hpp"
 #include "../Bet.hpp"
 #include "../SorGoalLabel.hpp"
+#include "../SorDuelLayer.hpp"
+#include <Geode/ui/BasedButtonSprite.hpp>
 
 using namespace geode::prelude;
 
@@ -17,6 +19,22 @@ class $modify(LevelInfoLayer)
 
 		// Sorrow: glimmer bet chip next to the favorite button.
 		sorrow::attachLevelBetButton(this, static_cast<std::int64_t>(level->m_levelID.value()));
+
+		// Sorrow: "duel on this level" (rated / uploaded levels only).
+		if (level->m_levelID.value() > 0) {
+			if (auto* menu = this->getChildByID("sor-bet-menu"); menu && menu->getChildrenCount() > 0) {
+				auto* first = static_cast<CCNode*>(menu->getChildren()->objectAtIndex(0));
+				auto* vs = CCLabelBMFont::create("VS", "bigFont.fnt");
+				vs->setScale(.55f);
+				auto* spr = CircleButtonSprite::create(vs, CircleBaseColor::Pink, CircleBaseSize::Small);
+				spr->setScale(first->getScaledContentHeight() / std::max(1.f, spr->getContentHeight()));
+				Ref<GJGameLevel> lv = level;
+				auto* btn = CCMenuItemExt::createSpriteExtra(spr, [lv](CCMenuItemSpriteExtra*) { sorrow::duels::openVersus(lv); });
+				btn->setID("sor-duel-button");
+				btn->setPosition(first->getPosition() + CCPoint { first->getScaledContentWidth() + 6.f, 0.f });
+				menu->addChild(btn);
+			}
+		}
 
 		// Gray "(goal%)" next to the normal-mode percentage - solo roulette goal
 		// or room round target. Lives on a schedule, so it also appears once

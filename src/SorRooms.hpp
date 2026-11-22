@@ -1111,6 +1111,13 @@ inline int roundTargetFor(int levelId) {
 // players. While you are in a roulette room, everyone in the level who is
 // NOT in your room is hidden (player + progress-bar icon) - the same view
 // as being in a private Globed room. Leaving the room shows everyone again.
+// Set by the duel code: GD accounts of your live duel (empty = no duel).
+// A duel takes precedence over the room view.
+inline std::function<std::vector<int>()>& extraVisibleAccounts() {
+    static std::function<std::vector<int>()> f;
+    return f;
+}
+
 class SorGlobedRoomFilter : public cocos2d::CCNode {
 public:
     static SorGlobedRoomFilter* create() {
@@ -1124,12 +1131,14 @@ public:
 #if SORROW_GLOBED_HEADERS
         if (!globedAvailable() || !globed::api::game::isActive()) return;
         const auto& st = state();
-        const bool filtering = st.active;
+        const auto duelAccs = extraVisibleAccounts() ? extraVisibleAccounts()() : std::vector<int>{};
+        const auto& allowed = duelAccs.empty() ? st.playerAccounts : duelAccs;
+        const bool filtering = st.active || !duelAccs.empty();
         auto* pl = PlayLayer::get();
         for (auto& rp : globed::api::game::getPlayers()) {
             if (!rp) continue;
             const int acc = globed::api::player::getAccountId(rp.get());
-            const bool inRoom = std::find(st.playerAccounts.begin(), st.playerAccounts.end(), acc) != st.playerAccounts.end();
+            const bool inRoom = std::find(allowed.begin(), allowed.end(), acc) != allowed.end();
             const bool hide = filtering && !inRoom;
             if (hide != m_hidden.contains(acc)) {
                 globed::api::player::setForceHide(rp.get(), hide);

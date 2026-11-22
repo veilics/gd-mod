@@ -1,3 +1,15 @@
+## v2.24.0 - Versus duels
+- NEW: GD's Versus button (Create page) is no longer gray and opens Sorrow Versus duels.
+- 1v1 challenges and open Races (up to 8 players), with a Glimmer stake where the winner takes the pot.
+- Modes: Race (first to the target %), Showdown (highest % in the time limit), Sudden Death (one attempt each); best of 1 / 3 / 5.
+- Ranked Elo (Bronze, Silver, Gold, Platinum, Diamond, Champion), leaderboard, duel history, win streaks and duel earnings.
+- Auto-travel to every round's level with a 3-2-1-GO countdown and auto Play; an in-level VS panel shows round, score pips, everyone's best % and the clock.
+- Spectators: Live tab to watch duels and side-bet on a player until round 1 starts (pari-mutuel pool).
+- Rematch button, forfeit, disconnect = forfeit, invites expire after 10 minutes.
+- Globed: Nearby players to challenge, only duel players visible in-level, instant sync pings, WIN / LOSS under your icon.
+- VS button on level pages to duel on that exact level; /gd duel and /gd duelboard in Discord.
+- BOT (upload gd.js + restart).
+
 ## v2.23.0 - Golden bet bar, challenge search fix, effect settings
 - FIXED challenges stuck on "No level found yet" (e.g. Beat a Mythic Insane). The search now walks the filtered results page by page instead of trying a few random pages, retries when RobTop doesn't answer, then checks levels saved on your device. If there really is no level left that you haven't done, the rarity steps down one tier for free (Mythic -> Legendary -> Epic -> Featured).
 - GOLDEN BET PROGRESS BAR: from 30% away the fill melts into a molten-gold gradient with a shine sweeping along it, a golden halo breathes around the bar, gold sparks and embers fly off the fill, the % label shimmers gold, and the target gem pings faster as you close in. Crossing the target LOCKS IN with a gem fountain, a spark ring and a golden flash.

@@ -22,6 +22,17 @@ Sorrow Integration connects Geometry Dash to the **Sorrow Discord bot**. Your Gl
   - **Room history** shows past games and results.
 - Each level's song loads correctly, and the goal percent shows on the progress bar.
 
+## Versus Duels
+
+- GD's **Versus** button on the Create page works now. It opens the duels screen.
+- **Challenge** a player 1v1, or open a **Race** for up to 8 players. Winner takes the Glimmer pot.
+- Three modes: **Race** (first to the target %), **Showdown** (highest % before time runs out) and **Sudden Death** (one attempt each), best of 1, 3 or 5.
+- **Ranked** duels move your Elo, from Bronze up to Champion, with a leaderboard and duel history.
+- Everyone is taken to each round's level and starts on a 3-2-1-GO countdown. An in-level panel shows the score, everyone's % and the clock.
+- Spectators can **side-bet** on who wins. Rematch with one tap.
+- **Globed:** players near you show up to challenge, and during a duel you only see your opponents.
+- Duel on a specific level with the **VS** button on any level page, or from Discord with /gd duel.
+
 ## Daily & Weekly Challenges
 
 - **Daily and weekly challenges** ask you to beat a specific rated level or reach a percent on a demon, with big Glimmer rewards.

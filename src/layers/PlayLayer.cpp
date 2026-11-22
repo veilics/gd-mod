@@ -1,4 +1,5 @@
 #include <Geode/modify/PlayLayer.hpp>
+#include "../SorDuels.hpp"
 #include <Geode/modify/GJBaseGameLayer.hpp>
 
 #include <Geode/binding/GameManager.hpp>
@@ -50,7 +51,9 @@ class $modify(RLPlayLayer, PlayLayer)
 		this->addChild(sorrow::SorGoalLabel::create(static_cast<int>(level->m_levelID.value()), 0.f,
 			[this]() { return this->m_percentageLabel; }), 1001);
 		sorrow::rooms::listenRoomEvents(); // no-op once registered (Globed may load after us)
-		sorrow::rooms::attachGlobedFilter(this);  // only your roulette room is visible
+		sorrow::rooms::attachGlobedFilter(this);  // only your roulette room / duel is visible
+		sorrow::duels::attachHud(this, static_cast<int>(level->m_levelID.value()));
+		sorrow::duels::listenGlobed();
 		if (!sorrow::chal::state().loaded) sorrow::chal::fetch(); // so challenge runs can be claimed
 
 		return true;
@@ -130,6 +133,8 @@ class $modify(RLPlayLayer, PlayLayer)
 		if (!this->m_isPracticeMode)
 			sorrow::rooms::reportProgress(static_cast<int>(this->m_level->m_levelID.value()),
 				std::string(this->m_level->m_levelName), percentage, false);
+		if (!this->m_isPracticeMode && !this->m_isTestMode)
+			sorrow::duels::reportProgress(static_cast<int>(this->m_level->m_levelID.value()), percentage, false);
 		if (!this->m_isPracticeMode && !this->m_isTestMode)
 			sorrow::chal::onRun(static_cast<int>(this->m_level->m_levelID.value()), percentage, false);
 
@@ -243,6 +248,8 @@ class $modify(RLPlayLayer, PlayLayer)
 		if (!this->m_isPracticeMode)
 			sorrow::rooms::reportProgress(static_cast<int>(this->m_level->m_levelID.value()),
 				std::string(this->m_level->m_levelName), 100, true);
+		if (!this->m_isPracticeMode && !this->m_isTestMode)
+			sorrow::duels::reportProgress(static_cast<int>(this->m_level->m_levelID.value()), 100, true);
 		if (!this->m_isPracticeMode && !this->m_isTestMode)
 			sorrow::chal::onRun(static_cast<int>(this->m_level->m_levelID.value()), 100, true);
 

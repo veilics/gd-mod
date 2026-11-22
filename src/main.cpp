@@ -13,6 +13,7 @@
 #include "GlobedLink.hpp"
 #include "ProfilePage.hpp"
 #include "SorRooms.hpp"
+#include "SorDuelLayer.hpp"
 #include "Chests.hpp"
 #include "Garage.hpp"
 
@@ -209,5 +210,8 @@ $on_mod(Loaded) {
     geode::queueInMainThread([] {
         sorrow::rooms::RoomDirector::get();   // follows your room wherever you are
         sorrow::rooms::listenRoomEvents();    // Globed room sync + invites
+        sorrow::duels::DuelDirector::get();   // Versus duels: invites, rounds, results
+        sorrow::duels::installScreenHook();
+        sorrow::duels::listenGlobed();
     });
 }
