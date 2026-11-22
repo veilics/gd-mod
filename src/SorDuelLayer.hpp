@@ -167,6 +167,7 @@ protected:
     void showText(const std::string& t) {
         m_list->removeAllChildren();
         auto* l = label(t, "bigFont.fnt", .35f, { 200, 200, 200 });
+        l->limitLabelWidth(m_size.width - 40.f, .35f, .15f);
         l->setPosition({ m_size.width / 2.f, m_size.height / 2.f - 20.f });
         m_list->addChild(l);
     }
@@ -192,6 +193,7 @@ protected:
             nm->setPosition({ 25.f, y + 4.f });
             m_list->addChild(nm);
             auto* rk = label(fmt::format("{} {}  -  {}W {}L", f.rank, f.elo, f.w, f.l), "goldFont.fnt", .38f, rankColor(f.rank), { 0.f, .5f });
+            rk->limitLabelWidth(125.f, .38f, .2f);
             rk->setPosition({ 25.f, y - 6.f });
             m_list->addChild(rk);
             if (f.nearby) {
@@ -290,12 +292,14 @@ protected:
     // segmented control: equal widths, selected one green
     void segment(CCMenu* menu, float x0, float y, float w, const std::vector<std::pair<std::string, std::string>>& opts,
                  const std::string& cur, std::function<void(std::string)> pick) {
+        // Every button gets the same absolute width, then is scaled so it
+        // fills its slot minus a gap: equal widths, never overlapping.
         const float step = w / opts.size();
         for (size_t i = 0; i < opts.size(); ++i) {
             const auto val = opts[i].first;
-            auto* spr = ButtonSprite::create(opts[i].second.c_str(), static_cast<int>((step - 4.f) / .6f), true, "bigFont.fnt",
-                val == cur ? "GJ_button_01.png" : "GJ_button_04.png", 26.f, .5f);
-            spr->setScale(.6f);
+            auto* spr = ButtonSprite::create(opts[i].second.c_str(), 150, true, "bigFont.fnt",
+                val == cur ? "GJ_button_01.png" : "GJ_button_04.png", 30.f, .55f);
+            spr->setScale(std::min(.6f, (step - 6.f) / std::max(1.f, spr->getContentWidth())));
             auto* b = CCMenuItemExt::createSpriteExtra(spr, [this, pick, val](CCMenuItemSpriteExtra*) { pick(val); this->rebuild(); });
             b->setPosition({ x0 + step * (i + .5f), y });
             menu->addChild(b);
@@ -315,6 +319,7 @@ protected:
         this->segment(menu, x0, 240.f, segW, { { "race", "Race" }, { "showdown", "Showdown" }, { "consistency", "Consistency" }, { "sudden", "Sudden" } },
             m_o.mode, [this](std::string v) { m_o.mode = v; });
         auto* md = label(modeDesc(m_o.mode), "bigFont.fnt", .26f, { 200, 200, 225 });
+        md->limitLabelWidth(segW, .26f, .12f);
         md->setPosition({ x0 + segW / 2.f, 222.f });
         m_body->addChild(md);
 
@@ -350,6 +355,7 @@ protected:
         menu->addChild(plus);
         if (race) {
             auto* hint = label(m_o.target >= 100 ? "Completion race" : "Highest % wins if time runs out", "bigFont.fnt", .24f, { 180, 180, 205 }, { 0.f, .5f });
+            hint->limitLabelWidth(segW - 132.f, .24f, .1f);
             hint->setPosition({ x0 + 128.f, 160.f });
             m_body->addChild(hint);
         }
@@ -391,6 +397,7 @@ protected:
             : m_kind == "tour" ? "Single elimination - prize pool: 1st 70%, 2nd 30%"
             : "Winner takes both stakes - ranked duels move your Elo";
         auto* hint = label(hintText, "bigFont.fnt", .25f, { 190, 190, 215 });
+        hint->limitLabelWidth(W - 30.f, .25f, .12f);
         hint->setPosition({ W / 2.f, 50.f });
         m_body->addChild(hint);
     }

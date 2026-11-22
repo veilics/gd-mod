@@ -1,3 +1,7 @@
+## v2.25.1 - Versus UI fixes
+- Fixed the segmented buttons (Mode, Best of, Ranked/Casual, cup size) overlapping each other.
+- Fixed text running outside the Challenge a Player box and other long labels in the duel popups.
+
 ## v2.25.0 - Versus, Champions-style
 - The Versus button now shows GD's real full-colour sprite. GD ships it grayed out, so the mod swaps in the original GJ_versusBtn_001.png.
 - Versus screen uses GD's regular blue menu background with corner art instead of the photo. The balance moved next to the back button so nothing covers it.
