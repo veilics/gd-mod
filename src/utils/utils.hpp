@@ -68,7 +68,11 @@ namespace rl
 			auto now = std::chrono::system_clock::now();
 			auto timeNow = std::chrono::system_clock::to_time_t(now);
 			std::tm tm_local {};
+#ifdef _WIN32
+			localtime_s(&tm_local, &timeNow); // MSVC: (tm*, time_t*) - reversed vs POSIX
+#else
 			localtime_r(&timeNow, &tm_local);
+#endif
 
 			return tm_local.tm_mon == 3 && tm_local.tm_mday == 1;
 		}
