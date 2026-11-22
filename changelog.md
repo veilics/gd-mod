@@ -1,3 +1,6 @@
+## v2.22.2 - New icon
+- The mod's icon is now the Glimmer gem.
+
 ## v2.22.1 - Missing textures fix
 - FIXED icons, the roulette button, the background, the Glimmer gem and the win/coin sounds not loading in builds made from GitHub (Windows, macOS, the all-platforms file). The resource list pointed at the wrong folder, so those builds shipped without any of the mod's images or sounds.
 
