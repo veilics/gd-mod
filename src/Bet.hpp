@@ -58,18 +58,26 @@ inline bool& betInFlight() { static bool s = false; return s; }
 // attempt until disabled or the balance runs out.
 inline AttemptBet& recurringBet() { static AttemptBet s; return s; }
 inline bool& recurringOn() { static bool s = false; return s; }
+// The level the re-bet belongs to: it never carries over to other levels.
+inline std::int64_t& recurringLevel() { static std::int64_t s = 0; return s; }
+inline bool recurringFor(std::int64_t levelId) {
+    return recurringOn() && recurringBet().amount > 0 && recurringLevel() == levelId;
+}
 
 inline void loadBetPrefs() {
     auto mod = Mod::get();
     recurringBet().amount = static_cast<std::int64_t>(mod->getSavedValue<std::int64_t>("bet-rec-amount", 0));
     recurringBet().targetPct = mod->getSavedValue<int>("bet-rec-target", 100);
     recurringOn() = mod->getSavedValue<bool>("bet-rec-on", false);
+    recurringLevel() = mod->getSavedValue<std::int64_t>("bet-rec-level", 0);
+    if (recurringLevel() == 0) recurringOn() = false; // old global preset: drop it
 }
 inline void saveBetPrefs() {
     auto mod = Mod::get();
     mod->setSavedValue<std::int64_t>("bet-rec-amount", recurringBet().amount);
     mod->setSavedValue<int>("bet-rec-target", recurringBet().targetPct);
     mod->setSavedValue<bool>("bet-rec-on", recurringOn());
+    mod->setSavedValue<std::int64_t>("bet-rec-level", recurringLevel());
 }
 inline void stopRecurring() {
     recurringOn() = false;
@@ -616,7 +624,7 @@ inline void placeAttemptBet(std::int64_t levelId, std::int64_t amount, int targe
 inline void applyRecurringIfDue(std::int64_t levelId, GJGameLevel* level = nullptr) {
     static bool loaded = false;
     if (!loaded) { loaded = true; loadBetPrefs(); }
-    if (!recurringOn() || recurringBet().amount <= 0) return;
+    if (!recurringFor(levelId)) return;
     if (activeBet().amount > 0 && activeBetLevel() == levelId) return; // already placed
     if (betInFlight()) return;
     const auto rules = betRulesForLevel(level);
@@ -786,9 +794,25 @@ protected:
         auto* everyMenu = CCMenu::create();
         everyMenu->setPosition({ 0.f, 0.f });
         m_mainLayer->addChild(everyMenu);
-        m_everyBtn = ui::checkbox(&m_every, "Re-bet every attempt", .7f, .42f, 200.f, [](bool on) {
-            Notification::create(on ? "Re-bet on - press Place bet to save it" : "Re-bet off - press Place bet to save it",
-                NotificationIcon::Info, 1.2f)->show();
+        m_everyBtn = ui::checkbox(&m_every, "Re-bet every attempt", .7f, .42f, 200.f, [this](bool on) {
+            // applies right away (not only when a bet is placed)
+            if (!on) {
+                stopRecurring();
+                Notification::create("Re-bet off", NotificationIcon::Info, 1.f)->show();
+                return;
+            }
+            auto amount = std::min(this->parsedAmount(), m_rules.cap);
+            int pct = this->targetPct();
+            if (m_rules.targetLocked) pct = 100; else pct = std::max(pct, m_rules.minTarget);
+            if (amount <= 0) {
+                Notification::create("Enter an amount - re-bet starts when you place the bet", NotificationIcon::Info, 1.4f)->show();
+                return;
+            }
+            recurringOn() = true;
+            recurringBet() = { amount, pct };
+            recurringLevel() = m_levelId;
+            saveBetPrefs();
+            Notification::create(fmt::format("Re-bet on: {} @ {}%", formatGlimmer(amount), pct).c_str(), NotificationIcon::Success, 1.2f)->show();
         });
         m_everyBtn->setPosition({ cx, Y_EVERY });
         everyMenu->addChild(m_everyBtn);
@@ -896,6 +920,7 @@ protected:
                 if (amount > 0) {
                     recurringOn() = true;
                     recurringBet() = { amount, pct };
+                    recurringLevel() = m_levelId;
                     saveBetPrefs();
                     msg = fmt::format("Re-bet on: {} @ {}% from the next attempt", formatGlimmer(amount), pct);
                 }
@@ -939,6 +964,7 @@ protected:
         if (every) {
             recurringOn() = true;
             recurringBet() = { amount, pct };
+            recurringLevel() = m_levelId;
             saveBetPrefs();
         } else {
             stopRecurring();
@@ -966,7 +992,7 @@ public:
         ret->m_levelId = levelId;
         ret->m_rules = rules;
         if (ret->init(betui::W, betui::H)) {
-            ret->m_every = recurringOn() && recurringBet().amount > 0; // box starts checked
+            ret->m_every = recurringFor(levelId); // box starts checked (this level only)
             ret->setup(); // plain Popup: no automatic setup hook
             if (ret->m_every) {
                 ret->m_amountInput->setString(std::to_string(recurringBet().amount).c_str());
@@ -1049,7 +1075,7 @@ public:
             state = 1;
             text = "Placing bet...";
         }
-        const std::string rebet = recurringOn() && recurringBet().amount > 0
+        const std::string rebet = recurringFor(m_levelId)
             ? fmt::format("Re-bet: {} Glimmer @ {}%", formatGlimmer(recurringBet().amount), recurringBet().targetPct) : std::string();
         if (!force && state == m_state && text == m_text && rebet == m_rebetText) return;
         m_rebetText = rebet;
@@ -1180,29 +1206,8 @@ public:
         if (!m_passed) pl->m_progressFill->setColor(lerp(m_fillColor, c > 0.8f ? lerp(gold, amber, (c - 0.8f) / 0.2f * wave) : gold, c));
         else pl->m_progressFill->setColor(lerp(gold, { 255, 235, 140 }, wave));
 
-        // molten gradient over the filled part
-        if (m_goldFill) {
-            m_goldFill->setContentSize({ fillW, m_fillH });
-            m_goldFill->setStartOpacity(static_cast<GLubyte>(c * (110.f + 70.f * wave)));
-            m_goldFill->setEndOpacity(static_cast<GLubyte>(c * 150.f));
-        }
-
-        // shine sweep, faster the closer you are
-        if (m_shine) {
-            const float period = m_passed ? 0.9f : 1.9f - 1.3f * c;
-            m_shinePos += dt * (fillW + 30.f) / std::max(0.3f, period);
-            if (m_shinePos > fillW + 15.f) m_shinePos = -15.f;
-            const bool on = c > 0.03f && fillW > 6.f && m_shinePos < fillW - 4.f;
-            m_shine->setVisible(on);
-            m_shine->setPositionX(m_startX + m_shinePos);
-            m_shine->setOpacity(static_cast<GLubyte>(std::min(1.f, c * 1.3f) * 255.f));
-        }
-
-        // breathing halo around the bar
-        if (m_halo) {
-            m_halo->setColor(lerp(gold, amber, c > 0.8f ? (c - 0.8f) / 0.2f : 0.f));
-            m_halo->setOpacity(static_cast<GLubyte>(c * (35.f + 95.f * wave)));
-        }
+        // (no overlay rectangles: the fill sprite itself carries the gold -
+        //  extra layers drew boxes around / over the bar on some layouts)
 
         // % label shimmers gold and throbs
         if (auto* lab = pl->m_percentageLabel) {
@@ -1268,44 +1273,14 @@ private:
         m_fillY = fr.getMidY();
         m_markerX = m_startX + pl->m_progressWidth * target / 100.f;
 
-        // halo behind the bar frame
-        m_halo = cocos2d::CCLayerColor::create({ 255, 200, 60, 0 }, w + 12.f, h + 12.f);
-        m_halo->setPosition({ -6.f, -6.f });
-        m_halo->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
-        bar->addChild(m_halo, -1);
-
-        // molten gradient (light gold on top, deep amber at the bottom)
-        m_goldFill = cocos2d::CCLayerGradient::create({ 255, 245, 170, 0 }, { 255, 130, 0, 0 });
-        m_goldFill->setContentSize({ 0.f, m_fillH });
-        m_goldFill->setPosition({ m_startX, m_fillY - m_fillH / 2.f });
-        m_goldFill->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
-        bar->addChild(m_goldFill, 40);
-
-        // shine: a soft white-gold stripe (two mirrored gradients)
-        m_shine = cocos2d::CCNodeRGBA::create();
-        m_shine->setCascadeOpacityEnabled(true);
-        m_shine->setPosition({ m_startX, m_fillY - m_fillH / 2.f });
-        for (int side = 0; side < 2; ++side) {
-            auto* g = cocos2d::CCLayerGradient::create(
-                side == 0 ? cocos2d::ccColor4B { 255, 250, 210, 0 } : cocos2d::ccColor4B { 255, 250, 210, 220 },
-                side == 0 ? cocos2d::ccColor4B { 255, 250, 210, 220 } : cocos2d::ccColor4B { 255, 250, 210, 0 },
-                { 1.f, 0.f });
-            g->setContentSize({ 9.f, m_fillH });
-            g->setPosition({ side == 0 ? -9.f : 0.f, 0.f });
-            g->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
-            m_shine->addChild(g);
-        }
-        m_shine->setVisible(false);
-        bar->addChild(m_shine, 42);
-
         // target marker: gold tick, gem above, target % below
         m_marker = cocos2d::CCNodeRGBA::create();
         m_marker->setCascadeOpacityEnabled(true);
         m_marker->setPosition({ m_markerX, h / 2.f });
         bar->addChild(m_marker, 50);
-        auto* tick = cocos2d::CCLayerGradient::create({ 255, 250, 200, 255 }, { 255, 160, 20, 255 });
-        tick->setContentSize({ 2.f, h + 6.f });
-        tick->setPosition({ -1.f, -(h + 6.f) / 2.f });
+        auto* tick = cocos2d::CCLayerGradient::create({ 255, 250, 200, 230 }, { 255, 160, 20, 230 });
+        tick->setContentSize({ 1.f, m_fillH });
+        tick->setPosition({ -0.5f, m_fillY - h / 2.f - m_fillH / 2.f });
         m_marker->addChild(tick);
         if ((m_gem = betfx::glimmerSprite(10.f))) {
             m_gem->setPosition({ 0.f, h / 2.f + 9.f });
@@ -1330,29 +1305,25 @@ private:
             pl->m_percentageLabel->setScale(m_labelScale);
         }
         if (m_marker) { m_marker->setScale(1.f); m_marker->setPositionX(m_markerX); }
-        if (m_halo) m_halo->setOpacity(0);
-        if (m_goldFill) { m_goldFill->setStartOpacity(0); m_goldFill->setEndOpacity(0); }
-        if (m_shine) m_shine->setVisible(false);
+
     }
 
     void teardown() {
         if (!m_built) return;
         this->resetLook();
-        for (cocos2d::CCNode* n : { static_cast<cocos2d::CCNode*>(m_marker), static_cast<cocos2d::CCNode*>(m_halo),
-                                    static_cast<cocos2d::CCNode*>(m_goldFill), static_cast<cocos2d::CCNode*>(m_shine) })
-            if (n) n->removeFromParent();
-        m_marker = nullptr; m_halo = nullptr; m_goldFill = nullptr; m_shine = nullptr; m_gem = nullptr;
+        if (m_marker) m_marker->removeFromParent();
+        m_marker = nullptr; m_gem = nullptr;
         m_built = false;
         m_passed = false;
     }
 
     void spark(cocos2d::CCNode* bar, cocos2d::CCPoint at, float c) {
         const cocos2d::ccColor3B cols[] = { { 255, 240, 160 }, { 255, 200, 50 }, { 255, 150, 30 } };
-        auto* s = dot(cols[std::rand() % 3], 2.f, 2.f);
-        s->setPosition(at + cocos2d::CCPoint { 0.f, static_cast<float>((std::rand() % 7) - 3) });
+        auto* s = dot(cols[std::rand() % 3], 1.5f, 1.5f);
+        s->setPosition(at + cocos2d::CCPoint { 0.f, static_cast<float>((std::rand() % 3) - 1) });
         bar->addChild(s, 45);
         const float dx = -4.f - static_cast<float>(std::rand() % 18);
-        const float dy = static_cast<float>((std::rand() % 31) - 15) * (0.6f + c);
+        const float dy = static_cast<float>((std::rand() % 13) - 6) * (0.6f + c);
         const float t = 0.3f + (std::rand() % 25) / 100.f;
         s->runAction(cocos2d::CCSequence::create(
             cocos2d::CCSpawn::create(
@@ -1396,7 +1367,6 @@ private:
         const float h = bar->getContentHeight();
         const cocos2d::ccColor3B gold { 255, 205, 60 };
 
-        if (m_halo) { m_halo->setColor({ 255, 240, 170 }); m_halo->setOpacity(230); }
         if (auto* lab = pl->m_percentageLabel) {
             lab->runAction(cocos2d::CCSequence::create(
                 cocos2d::CCScaleTo::create(0.08f, m_labelScale * 1.35f),
@@ -1574,8 +1544,8 @@ inline void attachPauseBetControls(PauseLayer* layer, std::int64_t levelId, GJGa
     std::string status;
     if (activeBet().amount > 0 && activeBetLevel() == levelId) {
         status = fmt::format("Bet: {} @ {}%", formatGlimmer(activeBet().amount), activeBet().targetPct);
-    } else if (recurringOn() && recurringBet().amount > 0) {
-        status = fmt::format("Every attempt: {} @ {}%", formatGlimmer(recurringBet().amount), recurringBet().targetPct);
+    } else if (recurringFor(levelId)) {
+        status = fmt::format("Re-bet: {} Glimmer @ {}%", formatGlimmer(recurringBet().amount), recurringBet().targetPct);
     }
     if (!status.empty()) {
         auto lab = CCLabelBMFont::create(status.c_str(), "goldFont.fnt");

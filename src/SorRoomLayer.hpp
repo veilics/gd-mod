@@ -556,12 +556,12 @@ protected:
     void buildLobby() {
         m_roomLabel = label(m_lobbyRoot, "", "goldFont.fnt", .6f, { 20.f, 202.f }, { 0.f, .5f });
         auto* m = menuIn(m_lobbyRoot);
-        auto* leave = CCMenuItemSpriteExtra::create(btn("Leave", "GJ_button_06.png", 52, .5f), this,
+        auto* leave = CCMenuItemSpriteExtra::create(btn("Leave", "GJ_button_06.png", 56), this,
             menu_selector(SorrowRoomLayer::onLeave));
         leave->setID("leave");
         m->addChild(leave);
         m_leaveBtn = leave;
-        auto* hist = CCMenuItemSpriteExtra::create(btn("History", "GJ_button_02.png", 64, .5f), this,
+        auto* hist = CCMenuItemSpriteExtra::create(btn("History", "GJ_button_04.png", 66), this,
             menu_selector(SorrowRoomLayer::onHistory));
         m->addChild(hist);
         m_histBtn = hist;
@@ -592,15 +592,6 @@ protected:
         const auto& st = sorrow::rooms::state();
         m_roomLabel->setString(fmt::format("Room {}", st.code).c_str());
         m_roomLabel->limitLabelWidth(100.f, .6f, .2f);
-        // pack Leave + History right after the room name (real widths, 8pt gaps)
-        {
-            float x = 20.f + m_roomLabel->getScaledContentWidth() + 10.f;
-            for (auto* b : { m_leaveBtn, m_histBtn }) {
-                const float w = b->getScaledContentWidth();
-                b->setPosition({ x + w / 2.f, 202.f });
-                x += w + 8.f;
-            }
-        }
         m_potLabel->setString(fmt::format("Pot {}", sorrow::formatGlimmer(st.pot)).c_str());
         m_potLabel->limitLabelWidth(115.f, .5f, .2f);
 
@@ -640,6 +631,24 @@ protected:
         if (std::string(m_primarySpr->m_label->getString()) != primary) {
             m_primarySpr->m_label->setString(primary);
             m_primarySpr->m_label->limitLabelWidth(108.f, .6f, .2f);
+        }
+        // one bottom row: Leave | Bet/Skip | primary | Team | History, packed
+        // by their real widths so nothing overlaps
+        {
+            std::vector<cocos2d::CCNode*> row;
+            row.push_back(m_leaveBtn);
+            row.push_back(playing ? m_skipBtn : m_betBtn);
+            row.push_back(m_primaryBtn);
+            if (m_teamBtn->isVisible()) row.push_back(m_teamBtn);
+            row.push_back(m_histBtn);
+            float total = 0.f;
+            for (auto* b : row) total += b->getContentWidth();
+            const float sc = std::min(1.f, (W - 30.f - 6.f * (row.size() - 1)) / std::max(1.f, total));
+            for (auto* b : row) {
+                b->setScale(sc);
+                if (auto* it = typeinfo_cast<CCMenuItemSpriteExtra*>(b)) it->m_baseScale = sc; // keep size after the press bounce
+            }
+            sorrow::ui::row(row, CX, 28.f, 6.f);
         }
 
         // members: rebuild only when something visible changed

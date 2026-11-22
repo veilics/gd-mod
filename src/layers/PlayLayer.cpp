@@ -88,7 +88,10 @@ class $modify(RLPlayLayer, PlayLayer)
 		const auto lvl = static_cast<std::int64_t>(this->m_level->m_levelID.value());
 		if (!this->m_isPracticeMode && sorrow::activeBet().amount > 0 && sorrow::activeBetLevel() == lvl)
 		{
-			sorrow::resolveAttemptBet(lvl, static_cast<int>(std::floor(this->getCurrentPercent())), false);
+			// Dead = that attempt was already settled at death; a bet live now
+			// belongs to an attempt that never started, so it counts as 0%.
+			const bool dead = this->m_player1 && this->m_player1->m_isDead;
+			sorrow::resolveAttemptBet(lvl, dead ? 0 : static_cast<int>(std::floor(this->getCurrentPercent())), false);
 		}
 		PlayLayer::onQuit();
 	}
@@ -197,8 +200,9 @@ class $modify(RLPlayLayer, PlayLayer)
 				sorrow::resolveAttemptBet(
 					static_cast<std::int64_t>(this->m_level->m_levelID.value()), percentage, false);
 			}
-			// re-arm the every-attempt preset for the next attempt
-			sorrow::applyRecurringIfDue(static_cast<std::int64_t>(this->m_level->m_levelID.value()), this->m_level);
+			// (the every-attempt re-bet is placed in resetLevel, when the next
+			//  attempt really starts - placing it here, while still dead at the
+			//  winning %, let a pause+quit settle it as a second win)
 		}
 
 		// prevent delayedResetLevel from actually running its body

@@ -1,3 +1,10 @@
+## v2.25.4 - Bet + room fixes
+- Re-bet is tied to the level you turned it on in: the "Re-bet:" line and the auto bets no longer follow you into other levels, and unticking the box turns it off immediately.
+- FIXED a second win when you died at your bet % and then paused/left: the re-bet was placed while you were still dead at the winning %, and quitting settled it. Re-bets now start when the next attempt actually starts, and a bet left over from a dead attempt counts as 0%.
+- Progress bar bet effects: removed the overlay boxes (halo + gradient + shine) that drew a rectangle around the bar; the target line is thin and bar-height again. The fill itself still turns gold.
+- Roulette rooms: Leave and History moved into the bottom button row next to Bet / Start.
+- BOT: rooms can't start with only one player (it was a free win), and room winners get the pot only - it no longer pays your own bet a second time on top.
+
 ## v2.25.3 - Checkboxes, level buttons, bigger Versus buttons
 - FIXED "Re-bet every attempt" for real: the checkbox no longer uses GD's toggle button at all - it's a plain button that swaps the check mark itself, so it always shows. Tapping the text toggles it too. The room popup's two checkboxes use the same fix.
 - The Glimmer bet and VS buttons on level pages moved into GD's left button column, sized like the buttons there, so they no longer sit on top of other mods' buttons.
