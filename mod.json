@@ -10,7 +10,7 @@
 	"name": "Sorrow Integration",
 	"version": "v2.21.1",
 	"developer": "endrosity",
-	"description": "Level roulette (solo + Globed public rooms), Glimmer currency shared with the Discord bot, death stats. Includes GD-Roulette by SpaghettDev (AGPL-3.0).",
+	"description": "Glimmer betting, roulette (solo + multiplayer rooms), daily and weekly challenges, and Globed support - all connected to the Sorrow Discord bot.",
 	"tags": [
 		"integration",
 		"utility",
