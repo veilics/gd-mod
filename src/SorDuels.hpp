@@ -39,11 +39,11 @@ inline std::string str(const matjson::Value& v) { return v.asString().unwrapOr("
 
 struct Player {
     std::string uid, name, rank;
-    int acc = 0, iconId = 1, c1 = 0, c2 = 3, glow = 0, wins = 0, pct = 0, elo = 1000;
+    int acc = 0, iconId = 1, c1 = 0, c2 = 3, glow = 0, wins = 0, pct = 0, elo = 1000, best = 0, attempts = 0, timeMs = 0;
     bool ready = false, done = false, forfeited = false;
     std::int64_t side = 0;
 };
-struct RoundRow { int n = 0; std::string levelName, winner, winnerName, reason; int winnerPct = 0; };
+struct RoundRow { int n = 0; std::string levelName, winner, winnerName, reason; int winnerPct = 0, timeMs = 0; };
 struct Event { int seq = 0; std::string kind, text; };
 struct Result {
     bool has = false;
@@ -56,7 +56,9 @@ struct Duel {
     bool valid = false;
     std::string id, kind, state, mode, modeName, difficulty, rarity, name, hostId, hostName, invited, invitedName, me;
     int bestOf = 1, target = 50, seconds = 240, maxPlayers = 2, round = 0;
-    bool ranked = false, fixedLevel = false;
+    bool ranked = false, fixedLevel = false, queued = false;
+    std::string tourId;
+    int tourRound = 0;
     std::int64_t stake = 0, pot = 0, sidePool = 0, myBetAmount = 0;
     std::string myBetOn;
     int levelId = 0, levelStars = 0;
@@ -80,12 +82,32 @@ struct Duel {
         return s;
     }
 };
+inline std::string fmtTime(int ms) {
+    const int s = ms / 1000;
+    return fmt::format("{}:{:02}.{}", s / 60, s % 60, (ms % 1000) / 100);
+}
+struct Match { std::string a, aName, b, bName, winner, duelId, state, score; };
+struct Tour {
+    bool valid = false, mine = false;
+    std::string id, name, state, hostId, hostName, mode, modeName, difficulty, roundName, winnerId, winnerName;
+    int size = 8, bestOf = 1, target = 50, round = 0;
+    std::int64_t entry = 0, pot = 0, myPrize = 0;
+    int myPlace = 0;
+    std::vector<Player> players;
+    std::vector<std::vector<Match>> bracket;
+    std::vector<std::string> events;
+};
 struct Hist { std::string id, mode, kind, opp, result, score; std::int64_t net = 0; int elo = 0; };
 struct Me {
     std::string uid, rank = "Bronze";
     int elo = 1000, w = 0, l = 0, d = 0, games = 0, streak = 0, bestStreak = 0, position = 0;
+    int peakElo = 1000, seasonGames = 0, tourWins = 0;
+    std::string peakRank = "Bronze";
     std::int64_t earned = 0, balance = -1;
+    struct Reward { bool has = false; std::string seasonName, rank; int place = 0, elo = 0; std::int64_t amount = 0; } reward;
 };
+struct Queue { bool active = false, ranked = true; std::int64_t stake = 0; double since = 0; int window = 0, searching = 0; };
+struct Season { std::string name; double endsAt = 0; };
 struct State {
     bool loaded = false, linked = true;
     std::string error;
@@ -93,6 +115,10 @@ struct State {
     Duel duel, watching;
     std::vector<Duel> invites, open, live;
     std::vector<Hist> history;
+    Queue queue;
+    Tour myTour;
+    std::vector<Tour> tours;
+    Season season;
     std::string keepId;     // finished duel to keep showing / spectated duel to follow
 };
 inline State& state() { static State s; return s; }
@@ -112,6 +138,7 @@ inline Duel parseDuel(const matjson::Value& v) {
     d.maxPlayers = toInt(v["maxPlayers"], 2); d.round = toInt(v["round"]);
     d.ranked = v["ranked"].asBool().unwrapOr(false); d.fixedLevel = v["fixedLevel"].asBool().unwrapOr(false);
     d.stake = toI64(v["stake"]); d.pot = toI64(v["pot"]); d.sidePool = toI64(v["sidePool"]);
+    d.queued = v["queued"].asBool().unwrapOr(false); d.tourId = str(v["tourId"]); d.tourRound = toInt(v["tourRound"]);
     if (v["myBet"].isObject()) { d.myBetOn = str(v["myBet"]["on"]); d.myBetAmount = toI64(v["myBet"]["amount"]); }
     if (v["level"].isObject()) {
         d.levelId = toInt(v["level"]["id"]); d.levelName = str(v["level"]["name"]);
@@ -129,6 +156,7 @@ inline Duel parseDuel(const matjson::Value& v) {
             pl.elo = toInt(p["elo"], 1000); pl.ready = p["ready"].asBool().unwrapOr(false);
             pl.done = p["done"].asBool().unwrapOr(false); pl.forfeited = p["forfeited"].asBool().unwrapOr(false);
             pl.side = toI64(p["side"]);
+            pl.best = toInt(p["best"]); pl.attempts = toInt(p["attempts"]); pl.timeMs = toInt(p["time"]);
             d.players.push_back(std::move(pl));
         }
     if (auto arr = v["rounds"].asArray())
@@ -137,6 +165,7 @@ inline Duel parseDuel(const matjson::Value& v) {
             row.n = toInt(r["n"]); row.levelName = str(r["level"]["name"]); row.winner = str(r["winner"]);
             row.winnerName = str(r["winnerName"]); row.reason = str(r["reason"]);
             if (!row.winner.empty()) row.winnerPct = toInt(r["results"][row.winner]);
+            row.timeMs = toInt(r["time"]);
             d.rounds.push_back(std::move(row));
         }
     if (auto arr = v["events"].asArray())
@@ -157,6 +186,36 @@ inline Duel parseDuel(const matjson::Value& v) {
     return d;
 }
 
+inline Tour parseTour(const matjson::Value& v) {
+    Tour t;
+    if (!v.isObject()) return t;
+    t.valid = true;
+    t.id = str(v["id"]); t.name = str(v["name"]); t.state = str(v["state"]); t.hostId = str(v["hostId"]); t.hostName = str(v["hostName"]);
+    t.mode = str(v["mode"]); t.modeName = str(v["modeName"]); t.difficulty = str(v["difficulty"]); t.roundName = str(v["roundName"]);
+    t.winnerId = str(v["winnerId"]); t.winnerName = str(v["winnerName"]); t.mine = v["mine"].asBool().unwrapOr(false);
+    t.size = toInt(v["size"], 8); t.bestOf = toInt(v["bestOf"], 1); t.target = toInt(v["target"], 50); t.round = toInt(v["round"]);
+    t.entry = toI64(v["entry"]); t.pot = toI64(v["pot"]);
+    const auto me = str(v["me"]);
+    if (v["placements"][me].isObject()) { t.myPlace = toInt(v["placements"][me]["place"]); t.myPrize = toI64(v["placements"][me]["prize"]); }
+    if (auto arr = v["players"].asArray())
+        for (const auto& p : *arr) {
+            Player pl;
+            pl.uid = str(p["uid"]); pl.name = str(p["name"]); pl.rank = str(p["rank"]); pl.elo = toInt(p["elo"], 1000);
+            pl.iconId = toInt(p["iconId"], 1); pl.c1 = toInt(p["color1"]); pl.c2 = toInt(p["color2"], 3); pl.glow = toInt(p["glow"]);
+            t.players.push_back(std::move(pl));
+        }
+    if (auto rounds = v["bracket"].asArray())
+        for (const auto& r : *rounds) {
+            std::vector<Match> row;
+            if (auto ms = r.asArray())
+                for (const auto& m : *ms)
+                    row.push_back({ str(m["a"]), str(m["aName"]), str(m["b"]), str(m["bName"]), str(m["winner"]), str(m["duelId"]), str(m["state"]), str(m["score"]) });
+            t.bracket.push_back(std::move(row));
+        }
+    if (auto ev = v["events"].asArray()) for (const auto& e : *ev) t.events.push_back(str(e["text"]));
+    return t;
+}
+
 inline void apply(const matjson::Value& b) {
     auto& s = state();
     s.loaded = true;
@@ -167,6 +226,24 @@ inline void apply(const matjson::Value& b) {
     s.me.w = toInt(m["w"]); s.me.l = toInt(m["l"]); s.me.d = toInt(m["d"]); s.me.games = toInt(m["games"]);
     s.me.streak = toInt(m["streak"]); s.me.bestStreak = toInt(m["bestStreak"]); s.me.position = toInt(m["position"]);
     s.me.earned = toI64(m["earned"]); s.me.balance = m["balance"].isNumber() ? toI64(m["balance"]) : -1;
+    s.me.peakElo = toInt(m["peakElo"], s.me.elo); s.me.peakRank = str(m["peakRank"]);
+    s.me.seasonGames = toInt(m["seasonGames"]); s.me.tourWins = toInt(m["tourWins"]);
+    s.me.reward = {};
+    if (m["seasonReward"].isObject()) {
+        const auto& r = m["seasonReward"];
+        s.me.reward = { true, str(r["seasonName"]), str(r["rank"]), toInt(r["place"]), toInt(r["elo"]), toI64(r["amount"]) };
+    }
+    const double t0 = nowSec();
+    s.queue = {};
+    if (b["queue"].isObject()) {
+        const auto& q = b["queue"];
+        s.queue = { true, q["ranked"].asBool().unwrapOr(true), toI64(q["stake"]), t0 - toI64(q["waited"]) / 1000.0,
+            toInt(q["window"]), toInt(q["searching"]) };
+    }
+    s.myTour = parseTour(b["myTour"]);
+    s.tours.clear();
+    if (auto a = b["tours"].asArray()) for (const auto& x : *a) s.tours.push_back(parseTour(x));
+    s.season = { str(b["season"]["name"]), t0 + toI64(b["season"]["endsIn"]) / 1000.0 };
     s.duel = parseDuel(b["duel"]);
     s.watching = parseDuel(b["watching"]);
     s.invites.clear(); s.open.clear(); s.live.clear(); s.history.clear();
@@ -334,6 +411,42 @@ inline void sideBet(const std::string& id, const std::string& on, std::int64_t a
     call("duels/bet", b, cb, false);
 }
 
+inline void queue(bool ranked, std::int64_t stake, DuelCb cb) {
+    auto b = idBody(); b.set("ranked", ranked); b.set("stake", static_cast<double>(stake));
+    Bridge::post("duels/queue", b, [cb](bool ok, int, matjson::Value body) {
+        if (!ok) { if (cb) cb(false, errOf(body, "The bot did not answer")); return; }
+        poll();
+        if (cb) cb(true, "");
+    });
+}
+inline void unqueue() {
+    state().queue = {};
+    Bridge::post("duels/unqueue", idBody(), [](bool, int, matjson::Value) { poll(); });
+    changed();
+}
+inline void ackSeason() {
+    auto b = idBody(); b.set("what", "season");
+    state().me.reward = {};
+    Bridge::post("duels/ack", b, nullptr);
+}
+struct TourOptions { std::string mode = "race", difficulty = "any", title; int size = 8, bestOf = 1, target = 50, seconds = 240; std::int64_t entry = 0; };
+inline void tourCreate(const TourOptions& o, DuelCb cb) {
+    auto b = idBody();
+    b.set("mode", o.mode); b.set("difficulty", o.difficulty); b.set("size", o.size); b.set("bestOf", o.bestOf);
+    b.set("target", o.target); b.set("seconds", o.seconds); b.set("entry", static_cast<double>(o.entry)); b.set("title", o.title);
+    Bridge::post("tours/create", b, [cb](bool ok, int, matjson::Value body) {
+        if (cb) cb(ok, ok ? "" : errOf(body, "The bot did not answer"));
+        poll();
+    });
+}
+inline void tourAct(const char* path, const std::string& id, DuelCb cb = nullptr) {
+    auto b = idBody(); b.set("id", id);
+    Bridge::post(path, b, [cb](bool ok, int, matjson::Value body) {
+        if (cb) cb(ok, ok ? "" : errOf(body, "The bot did not answer"));
+        poll();
+    });
+}
+
 struct FoundPlayer { std::string uid, name, rank; int acc = 0, elo = 1000, w = 0, l = 0; bool nearby = false, busy = false; };
 inline void find(const std::string& query, std::function<void(std::vector<FoundPlayer>)> cb) {
     auto b = idBody();
@@ -409,6 +522,9 @@ inline void reportProgress(int levelId, int percent, bool completed) {
 }
 
 // ------------------------------------------------------------- the screen --
+inline std::function<void(std::string, std::string)>& rankUpHook() { static std::function<void(std::string, std::string)> f; return f; }
+inline std::function<void()>& seasonHook() { static std::function<void()> f; return f; }
+
 // Set by SorDuelLayer: opens the Versus screen (used after a duel ends).
 inline std::function<void()>& openScreenHook() { static std::function<void()> f; return f; }
 inline bool& screenOpen() { static bool b = false; return b; }
@@ -448,15 +564,23 @@ public:
         if (m_busy) return;
         m_wait -= dt;
         if (m_wait > 0.f) return;
-        m_wait = inDuel || screenOpen() || !state().keepId.empty() ? 1.2f : 10.f;
+        const bool busy = inDuel || screenOpen() || !state().keepId.empty() || state().queue.active
+            || (state().myTour.valid && state().myTour.state == "running");
+        m_wait = busy ? 1.2f : 10.f;
         m_busy = true;
         const Duel before = state().duel;
         std::set<std::string> knownInvites;
         for (auto& i : state().invites) knownInvites.insert(i.id);
         const bool first = !state().loaded;
-        poll([this, before, knownInvites, first] {
+        const std::string rankBefore = state().me.rank;
+        const int eloBefore = state().me.elo;
+        poll([this, before, knownInvites, first, rankBefore, eloBefore] {
             m_busy = false;
             this->diff(before, state().duel, knownInvites, first);
+            auto& me = state().me;
+            if (!first && state().loaded && !rankBefore.empty() && me.rank != rankBefore && me.elo > eloBefore && rankUpHook())
+                rankUpHook()(rankBefore, me.rank);
+            if (me.reward.has && !m_rewardShown && seasonHook()) { m_rewardShown = true; seasonHook()(); }
         });
     }
 
@@ -473,6 +597,13 @@ private:
                         NotificationIcon::Info, 4.f)->show();
                     playGlimmerSound(1.4f, 0.8f);
                 }
+        // matchmaking found someone / tournament match ready
+        if (b.valid && b.isMine() && (!a.valid || a.id != b.id) && (b.queued || !b.tourId.empty()) && b.state != "finished") {
+            const auto* opp = b.opponent();
+            Notification::create(fmt::format("{} - vs {}", b.queued ? "Match found!" : "Your tournament match is ready",
+                opp ? opp->name : std::string("?")).c_str(), NotificationIcon::Success, 3.f)->show();
+            playGlimmerSound(1.5f, 1.f);
+        }
         if (!b.valid || !b.isMine()) {
             if (a.valid && a.isMine() && a.state == "invite") {
                 // our invite disappeared without being accepted
@@ -613,7 +744,7 @@ private:
     }
 
     float m_wait = 0.f, m_travelIn = 0.f, m_returnIn = 0.f, m_playWait = 0.f;
-    bool m_busy = false, m_quitRequested = false, m_opening = false, m_playPressed = false;
+    bool m_busy = false, m_quitRequested = false, m_opening = false, m_playPressed = false, m_rewardShown = false;
     int m_seenEvent = 0, m_seenRound = -1;
     std::string m_seenId, m_presented;
     std::set<std::string> m_announced;
@@ -682,7 +813,8 @@ private:
         root->addChild(bg);
 
         auto* head = CCLabelBMFont::create(fmt::format("VS  R{}/{}  {}", std::max(1, d.round), d.bestOf,
-            d.mode == "race" ? fmt::format("RACE {}%", d.target) : d.mode == "sudden" ? std::string("ONE LIFE") : std::string("SHOWDOWN")).c_str(), "bigFont.fnt");
+            d.mode == "race" ? fmt::format("RACE {}%", d.target) : d.mode == "sudden" ? std::string("ONE LIFE")
+                : d.mode == "consistency" ? std::string("AVG %") : std::string("SHOWDOWN")).c_str(), "bigFont.fnt");
         head->setScale(0.28f);
         head->setAnchorPoint({ 0.f, 0.5f });
         head->setPosition({ 6.f, h - 9.f });
@@ -722,7 +854,9 @@ private:
                 34.f * std::clamp(p.pct, 0, 100) / 100.f, 4.f);
             bar->setPosition(barBg->getPosition());
             root->addChild(bar);
-            auto* pc = CCLabelBMFont::create(d.mode == "sudden" && !p.done ? "..." : fmt::format("{}%", p.pct).c_str(), "bigFont.fnt");
+            const std::string pcText = d.mode == "sudden" && !p.done ? std::string("...")
+                : d.mode == "consistency" ? fmt::format("{}% x{}", p.pct, p.attempts) : fmt::format("{}%", p.pct);
+            auto* pc = CCLabelBMFont::create(pcText.c_str(), "bigFont.fnt");
             pc->setScale(0.26f);
             pc->setAnchorPoint({ 1.f, 0.5f });
             pc->setPosition({ w - 5.f, y });

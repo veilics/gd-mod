@@ -33,7 +33,9 @@ class $modify(RLCreatorLayer, CreatorLayer)
 		sorrow::duels::openVersus();
 	}
 
-	// The Versus button ships grayed out: give it its real colours back.
+	// The Versus button ships with a grayed-out sprite (and disabled). Swap in
+	// GD's real full-colour GJ_versusBtn_001.png - same scale - the way other
+	// Versus mods do it; tinting the gray sprite cannot bring the colours back.
 	void enableVersusButton()
 	{
 		auto* menu = this->getChildByID("creator-buttons-menu");
@@ -45,26 +47,13 @@ class $modify(RLCreatorLayer, CreatorLayer)
 				if (item && item->getNormalImage() && isSpriteFrameName(item->getNormalImage(), "GJ_versusBtn_001.png")) { versus = item; break; }
 			}
 		}
-		if (!versus) return;
+		if (!versus) { log::warn("[sorrow] Versus button not found"); return; }
+		if (auto* fresh = CCSprite::createWithSpriteFrameName("GJ_versusBtn_001.png")) {
+			if (auto* old = versus->getNormalImage()) fresh->setScale(old->getScale());
+			versus->setSprite(fresh);
+		}
 		versus->setEnabled(true);
 		versus->setTarget(this, menu_selector(RLCreatorLayer::onMultiplayer));
-		std::function<void(CCNode*)> ungray = [&](CCNode* n) {
-			if (auto* rgba = typeinfo_cast<CCRGBAProtocol*>(n)) { rgba->setColor(ccColor3B { 255, 255, 255 }); rgba->setOpacity(255); }
-			for (auto* c : CCArrayExt<CCNode*>(n->getChildren())) ungray(c);
-		};
-		if (auto* img = versus->getNormalImage()) ungray(img);
-		// a small pulse so people notice it works now
-		if (auto* img = versus->getNormalImage(); img && !img->getChildByID("sor-versus-new"_spr)) {
-			auto* tag = CCLabelBMFont::create("NEW", "bigFont.fnt");
-			tag->setID("sor-versus-new"_spr);
-			tag->setScale(.35f);
-			tag->setColor({ 255, 215, 80 });
-			tag->setPosition({ img->getContentWidth() - 6.f, img->getContentHeight() - 4.f });
-			tag->setRotation(15.f);
-			tag->runAction(CCRepeatForever::create(CCSequence::create(
-				CCScaleTo::create(.5f, .42f), CCScaleTo::create(.5f, .35f), nullptr)));
-			img->addChild(tag, 5);
-		}
 	}
 
 	bool init()

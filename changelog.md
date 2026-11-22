@@ -1,3 +1,16 @@
+## v2.25.0 - Versus, Champions-style
+- The Versus button now shows GD's real full-colour sprite. GD ships it grayed out, so the mod swaps in the original GJ_versusBtn_001.png.
+- Versus screen uses GD's regular blue menu background with corner art instead of the photo. The balance moved next to the back button so nothing covers it.
+- QUICK MATCH: Ranked (Bo3 completion race on a level that fits your Elo, Elo window widens while you wait) or Casual (Bo1, random mode). Live search timer and a Cancel button.
+- NEW MODE: Consistency - every attempt counts, highest average % wins.
+- Race completion times are recorded and shown between rounds.
+- TOURNAMENTS ("Cups" tab): 4 or 8 player single-elimination brackets with an entry fee; 1st 70% / 2nd 30% of the pool; byes for odd counts; live bracket view; your match starts automatically.
+- SEASONS: monthly. Glimmer rewards by final rank (50K Bronze up to 7.5M Champion, +10M/5M/2.5M for the top 3); Elo pulled halfway back to 1000.
+- Rank trophies with sparkles, peak rank, cups won, rank-up celebration popup, end-of-season reward popup.
+- Cleaner create popup: one setting per row (mode, best of + ranked / cup size, target or time, level picker, stake), with a hint line for each kind.
+- Redesigned Play tab: Quick Match banner, Challenge / Open Race / Tournament cards, Nearby on Globed.
+- BOT (upload gd.js + restart).
+
 ## v2.24.0 - Versus duels
 - NEW: GD's Versus button (Create page) is no longer gray and opens Sorrow Versus duels.
 - 1v1 challenges and open Races (up to 8 players), with a Glimmer stake where the winner takes the pot.

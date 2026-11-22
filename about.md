@@ -26,8 +26,11 @@ Sorrow Integration connects Geometry Dash to the **Sorrow Discord bot**. Your Gl
 
 - GD's **Versus** button on the Create page works now. It opens the duels screen.
 - **Challenge** a player 1v1, or open a **Race** for up to 8 players. Winner takes the Glimmer pot.
-- Three modes: **Race** (first to the target %), **Showdown** (highest % before time runs out) and **Sudden Death** (one attempt each), best of 1, 3 or 5.
-- **Ranked** duels move your Elo, from Bronze up to Champion, with a leaderboard and duel history.
+- **Quick Match:** Ranked or Casual matchmaking that pairs you with someone near your Elo.
+- Four modes: **Race** (first to the target %, with completion times), **Showdown** (highest % before time runs out), **Consistency** (every attempt counts, highest average %) and **Sudden Death** (one attempt each), best of 1, 3 or 5.
+- **Tournaments:** single-elimination cups for 4 or 8 players with an entry fee. 1st place gets 70% of the prize pool and 2nd gets 30%.
+- **Seasons:** every month ends with Glimmer rewards for your final rank, plus bonuses for the top 3.
+- **Ranked** duels move your Elo, from Bronze up to Champion. You get rank trophies, rank-up celebrations, a leaderboard and duel history.
 - Everyone is taken to each round's level and starts on a 3-2-1-GO countdown. An in-level panel shows the score, everyone's % and the clock.
 - Spectators can **side-bet** on who wins. Rematch with one tap.
 - **Globed:** players near you show up to challenge, and during a duel you only see your opponents.
