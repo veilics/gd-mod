@@ -1,0 +1,47 @@
+name: Build Sorrow Integration
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Windows
+            os: windows-latest
+            id: win
+          - name: macOS
+            os: macos-latest
+            id: mac
+          - name: Android 64
+            os: ubuntu-latest
+            id: android64
+          - name: Android 32
+            os: ubuntu-latest
+            id: android32
+          - name: iOS
+            os: macos-latest
+            id: ios
+
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and package the mod
+        id: build
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          build-dir: build
+          target: ${{ matrix.config.id }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sorrow-integration-${{ matrix.config.id }}
+          path: ${{ steps.build.outputs.package-path }}

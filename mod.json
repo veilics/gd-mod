@@ -1,0 +1,84 @@
+{
+	"geode": "5.11.2",
+	"gd": {
+		"win": "2.2081",
+		"android": "2.2081",
+		"mac": "2.2081",
+		"ios": "2.2081"
+	},
+	"id": "endrosity.sorrow-integration",
+	"name": "Sorrow Integration",
+	"version": "v2.21.1",
+	"developer": "endrosity",
+	"description": "Level roulette (solo + Globed public rooms), Glimmer currency shared with the Discord bot, death stats. Includes GD-Roulette by SpaghettDev (AGPL-3.0).",
+	"tags": [
+		"integration",
+		"utility",
+		"online"
+	],
+	"links": {},
+	"dependencies": {
+		"dankmeme.globed2": {
+			"version": ">=2.2.0",
+			"required": false
+		}
+	},
+	"settings": {
+		"show-hud": {
+			"name": "Show HUD",
+			"description": "Display the roulette HUD (target percent, deaths, best, Glimmer) while a session is active.",
+			"type": "bool",
+			"default": true
+		},
+		"group-auto-join": {
+			"name": "Group Auto-Join",
+			"description": "When a Globed room-mate starts a Sorrow group roulette, join it automatically.",
+			"type": "bool",
+			"default": true
+		},
+		"report-deaths": {
+			"name": "Report Deaths",
+			"description": "Send your deaths (level, percent, attempt number) to the bridge for /gd stats. Practice and cheated runs are never reported.",
+			"type": "bool",
+			"default": true
+		},
+		"max-skips": {
+			"name": "Number of skips",
+			"description": "The maximum amount of skips allowed during a round of the roulette.",
+			"type": "int",
+			"control": {
+				"input": true,
+				"arrows": true,
+				"arrow-step": 1,
+				"big-arrows": true,
+				"big-arrow-step": 5
+			},
+			"default": 3,
+			"max": 9999,
+			"min": 0
+		},
+		"hide-goal-reached": {
+			"name": "Hide Goal Reached",
+			"description": "Hide the 'Goal Reached!' popup after a short while after reaching the goal.",
+			"type": "bool",
+			"default": true
+		},
+		"use-big-button": {
+			"name": "Use big button",
+			"description": "Use a big button rather than the small circle button. Only works with Pages API installed.",
+			"type": "bool",
+			"default": false
+		},
+		"roulette-button": {
+			"name": "Roulette entry button",
+			"description": "Show the roulette button on the creator page (solo roulette + multiplayer rooms).",
+			"type": "bool",
+			"default": true
+		}
+	},
+	"resources": {
+		"sprites": [
+			"endrosity.sorrow-integration/*.png"
+		]
+	}
+}

@@ -1,0 +1,92 @@
+#include "RLRepeatingBackground.hpp"
+
+#include <Geode/binding/CCMenuItemSpriteExtra.hpp>
+#include <Geode/loader/Mod.hpp>
+
+#include <fmt/format.h>
+
+#ifndef ROULETTE_DEBUG_BUILD
+#include "utils.hpp"
+#endif
+
+using namespace geode::prelude;
+
+RLRepeatingBackground* RLRepeatingBackground::create(const char* texture)
+{
+	auto ret = new RLRepeatingBackground();
+
+	if (ret && ret->init(texture))
+		ret->autorelease();
+	else
+	{
+		delete ret;
+		ret = nullptr;
+	}
+
+	return ret;
+}
+
+bool RLRepeatingBackground::init(const char* texture)
+{
+	if (!CCLayer::init()) return false;
+
+	bg1 = CCSprite::create(texture);
+	bg1->setAnchorPoint({ .0f, .0f });
+	bg1->setPosition({ .0f, .0f });
+	bg1->setID("background-1");
+	this->addChild(bg1, -1);
+
+	bg2 = CCSprite::create(texture);
+	bg2->setAnchorPoint({ .0f, .0f });
+	bg2->setPosition({ bg2->getContentWidth() - 1.f, .0f }); // -1 to avoid a gap
+	bg2->setID("background-2");
+	this->addChild(bg2, -1);
+
+	bg3 = CCSprite::create(texture);
+	bg3->setAnchorPoint({ .0f, .0f });
+	bg3->setPosition({ (2.f * bg3->getContentWidth()) - 1.f, .0f }); // -1 to avoid a gap
+	bg3->setID("background-3");
+	this->addChild(bg3, -1);
+
+
+	start();
+
+	return true;
+}
+
+void RLRepeatingBackground::setColor(const cocos2d::ccColor3B& color)
+{
+	bg1->setColor(color);
+	bg2->setColor(color);
+	bg3->setColor(color);
+}
+
+void RLRepeatingBackground::update(float dt)
+{
+	float newBG1PosX = bg1->getPositionX() - SCROLL_SPEED * dt;
+	float newBG2PosX = bg2->getPositionX() - SCROLL_SPEED * dt;
+	float newBG3PosX = bg3->getPositionX() - SCROLL_SPEED * dt;
+
+	bg1->setPositionX(newBG1PosX);
+	bg2->setPositionX(newBG2PosX);
+	bg3->setPositionX(newBG3PosX);
+
+	if (newBG1PosX <= -bg1->getContentWidth())
+		bg1->setPositionX(newBG3PosX + bg3->getContentWidth() - 1.f);
+
+	if (newBG2PosX <= -bg2->getContentWidth())
+		bg2->setPositionX(newBG1PosX + bg1->getContentWidth() - 1.f);
+
+	if (newBG3PosX <= -bg3->getContentWidth())
+		bg3->setPositionX(newBG2PosX + bg2->getContentWidth() - 1.f);
+}
+
+void RLRepeatingBackground::start()
+{
+	this->scheduleUpdate();
+}
+
+void RLRepeatingBackground::stop()
+{
+	this->unscheduleUpdate();
+}
