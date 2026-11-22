@@ -202,48 +202,159 @@ inline void assign(const std::string& id, const levels::LevelRow& r) {
     });
 }
 
-inline void rollFor(const std::string& id, int attempt) {
-    auto* c = find(id);
-    if (!c || c->done || c->hasLevel || c->diffs.empty()) return;
-    if (attempt == 0 && rolling().contains(id)) return;
-    rolling().insert(id);
-    if (attempt > 5) { rolling().erase(id); changed(); return; }
-    const std::string key = c->diffs[rnd(0, static_cast<int>(c->diffs.size()) - 1)];
-    const auto base = fmt::format("secret=Wmfd2893gb7&type=0&star=1&len=0,1,2,3,4{}{}", diffQuery(key), rarityFlag(c->rarity));
-    auto pickPage = [id, key, base, attempt](int maxPages) {
-        post(fmt::format("{}&page={}", base, rnd(0, maxPages - 1)), [id, key, attempt](std::string resp) {
-            auto* c = find(id);
-            if (!c) { rolling().erase(id); return; }
-            std::set<int> used;
-            for (auto* v : { &state().daily, &state().weekly }) for (auto& x : *v) if (x.hasLevel) used.insert(x.levelId);
-            std::vector<levels::LevelRow> ok;
-            for (auto& r : levels::parseResponse(resp)) {
-                if (r.length > 4) continue;                                   // platformer
-                if (r.difficultyLabel() != diffLabel(key)) continue;
-                if (rarityRank(r.rarity()) < rarityRank(c->rarity)) continue;
-                if (used.contains(r.id)) continue;
-                if (alreadyDone(*c, r.id)) continue;                          // CHECK: already beaten / already at %
-                ok.push_back(std::move(r));
+// Finding a level for a challenge:
+//   1) RobTop search with the challenge's difficulty + rarity filters. The
+//      result pages are walked IN ORDER from a random start (up to 12 per
+//      difficulty), so a small set like Mythic Insanes is covered completely
+//      instead of hoping a random page has one. Empty / rate-limited replies
+//      are retried.
+//   2) Levels saved on this device (everything you have opened/played) that
+//      match and that you have not finished yet.
+//   3) Still nothing: the bot steps the rarity down one tier (free) and the
+//      search runs again.
+struct RollJob {
+    std::string id;
+    std::vector<std::string> keys;   // difficulty keys, shuffled
+    size_t keyIdx = 0;
+    std::string base;
+    int maxPages = 1, start = 0, scanned = 0, retries = 0;
+};
+
+inline bool matchesRow(const Challenge& c, const std::string& key, const levels::LevelRow& r, const std::set<int>& used) {
+    if (r.length > 4) return false;                                   // platformer
+    if (r.difficultyLabel() != diffLabel(key)) return false;
+    if (rarityRank(r.rarity()) < rarityRank(c.rarity)) return false;
+    if (used.contains(r.id)) return false;
+    return !alreadyDone(c, r.id);                                     // CHECK: already beaten / already at %
+}
+
+inline std::set<int> usedLevels() {
+    std::set<int> used;
+    for (auto* v : { &state().daily, &state().weekly }) for (auto& x : *v) if (x.hasLevel) used.insert(x.levelId);
+    return used;
+}
+
+// 2) saved levels on this device
+inline bool rollFromSaved(Challenge& c) {
+    auto* glm = GameLevelManager::get();
+    if (!glm || !glm->m_onlineLevels) return false;
+    const auto used = usedLevels();
+    std::vector<levels::LevelRow> ok;
+    for (auto [key, lvl] : geode::cocos::CCDictionaryExt<std::string, GJGameLevel*>(glm->m_onlineLevels)) {
+        if (!lvl || lvl->m_stars.value() <= 0) continue;              // rated only
+        levels::LevelRow r;
+        r.id = static_cast<int>(lvl->m_levelID.value());
+        r.name = lvl->m_levelName;
+        r.author = lvl->m_creatorName;
+        r.stars = lvl->m_stars.value();
+        r.length = lvl->m_levelLength;
+        r.demon = lvl->m_demon.value() > 0;
+        r.demonTier = lvl->m_demonDifficulty;
+        r.autoLevel = lvl->m_autoLevel;
+        r.featured = lvl->m_featured;
+        r.epic = lvl->m_isEpic;
+        r.face = r.stars >= 8 ? 5 : r.stars >= 6 ? 4 : r.stars >= 4 ? 3 : r.stars == 3 ? 2 : 1;
+        for (const auto& k : c.diffs)
+            if (matchesRow(c, k, r, used)) { ok.push_back(r); break; }
+    }
+    if (ok.empty()) return false;
+    assign(c.id, ok[rnd(0, static_cast<int>(ok.size()) - 1)]);
+    return true;
+}
+
+// 3) nothing anywhere: let the bot relax the rarity, then search again
+inline void relaxAndRetry(const std::string& id) {
+    auto b = idBody();
+    b.set("id", id);
+    b.set("reason", "nolevel");
+    Bridge::post("challenges/reroll", b, [id](bool ok, int, matjson::Value body) {
+        rolling().erase(id);
+        if (ok && body["relaxed"].asBool().unwrapOr(false)) {
+            const auto before = find(id) ? find(id)->rarity : std::string();
+            apply(body);
+            if (auto* c = find(id); c && c->rarity != before) {
+                Notification::create(fmt::format("No {} level left that you haven't done - now: {}",
+                    before, c->title).c_str(), NotificationIcon::Info, 3.f)->show();
+                rollFor(id);
             }
-            if (ok.empty()) { rollFor(id, attempt + 1); return; }
-            const auto& pick = ok[rnd(0, static_cast<int>(ok.size()) - 1)];
-            levels::cacheRow(pick);
-            assign(id, pick);
-        });
-    };
-    if (auto it = pages().find(base); it != pages().end()) { pickPage(it->second); return; }
-    post(base + "&page=0", [base, pickPage, id](std::string resp) {
+        }
+        changed();
+    });
+}
+
+inline void rollStep(std::shared_ptr<RollJob> job);
+
+inline void rollNextKey(std::shared_ptr<RollJob> job) {
+    auto* c = find(job->id);
+    if (!c || c->done || c->hasLevel) { rolling().erase(job->id); changed(); return; }
+    if (job->keyIdx >= job->keys.size()) {
+        if (rollFromSaved(*c)) return;
+        relaxAndRetry(job->id);
+        return;
+    }
+    const auto& key = job->keys[job->keyIdx];
+    job->base = fmt::format("secret=Wmfd2893gb7&type=0&star=1&len=0,1,2,3,4{}{}", diffQuery(key), rarityFlag(c->rarity));
+    job->scanned = 0;
+    job->retries = 0;
+    if (auto it = pages().find(job->base); it != pages().end()) {
+        job->maxPages = it->second;
+        job->start = rnd(0, job->maxPages - 1);
+        rollStep(job);
+        return;
+    }
+    post(job->base + "&page=0", [job](std::string resp) {
+        if (resp.empty() || resp == "-1") {
+            if (++job->retries <= 2) { rollNextKey(job); return; }      // rate limited / hiccup: try again
+            ++job->keyIdx; rollNextKey(job); return;                    // this difficulty has nothing
+        }
         int total = 0, per = 10;
         const auto sections = levels::split(resp, "#");
         if (sections.size() > 3) {
             const auto pg = levels::split(sections[3], ":");
             try { total = std::stoi(pg.at(0)); per = std::max(1, std::stoi(pg.at(2))); } catch (...) {}
         }
-        if (resp.empty() || resp == "-1") { rolling().erase(id); changed(); return; }
-        const int maxPages = std::clamp((total + per - 1) / per, 1, 1000);
-        pages()[base] = maxPages;
-        pickPage(maxPages);
+        job->maxPages = std::clamp((total + per - 1) / per, 1, 1000);
+        pages()[job->base] = job->maxPages;
+        job->start = rnd(0, job->maxPages - 1);
+        job->retries = 0;
+        rollStep(job);
     });
+}
+
+inline void rollStep(std::shared_ptr<RollJob> job) {
+    if (job->scanned >= std::min(job->maxPages, 12)) { ++job->keyIdx; rollNextKey(job); return; }
+    const int page = (job->start + job->scanned) % job->maxPages;
+    post(fmt::format("{}&page={}", job->base, page), [job](std::string resp) {
+        auto* c = find(job->id);
+        if (!c || c->done || c->hasLevel) { rolling().erase(job->id); changed(); return; }
+        if ((resp.empty() || resp == "-1") && ++job->retries <= 2) { rollStep(job); return; }
+        job->retries = 0;
+        const auto used = usedLevels();
+        std::vector<levels::LevelRow> ok;
+        for (auto& r : levels::parseResponse(resp))
+            if (matchesRow(*c, job->keys[job->keyIdx], r, used)) ok.push_back(std::move(r));
+        if (!ok.empty()) {
+            const auto& pick = ok[rnd(0, static_cast<int>(ok.size()) - 1)];
+            levels::cacheRow(pick);
+            assign(job->id, pick);
+            return;
+        }
+        ++job->scanned;
+        rollStep(job);
+    });
+}
+
+inline void rollFor(const std::string& id, int) {
+    auto* c = find(id);
+    if (!c || c->done || c->hasLevel || c->diffs.empty()) return;
+    if (rolling().contains(id)) return;
+    rolling().insert(id);
+    auto job = std::make_shared<RollJob>();
+    job->id = id;
+    job->keys = c->diffs;
+    for (size_t i = job->keys.size(); i > 1; --i) std::swap(job->keys[i - 1], job->keys[rnd(0, static_cast<int>(i) - 1)]);
+    rollNextKey(job);
+    changed();
 }
 
 inline void reroll(const std::string& id, bool ineligible) {

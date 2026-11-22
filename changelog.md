@@ -1,3 +1,9 @@
+## v2.23.0 - Golden bet bar, challenge search fix, effect settings
+- FIXED challenges stuck on "No level found yet" (e.g. Beat a Mythic Insane). The search now walks the filtered results page by page instead of trying a few random pages, retries when RobTop doesn't answer, then checks levels saved on your device. If there really is no level left that you haven't done, the rarity steps down one tier for free (Mythic -> Legendary -> Epic -> Featured).
+- GOLDEN BET PROGRESS BAR: from 30% away the fill melts into a molten-gold gradient with a shine sweeping along it, a golden halo breathes around the bar, gold sparks and embers fly off the fill, the % label shimmers gold, and the target gem pings faster as you close in. Crossing the target LOCKS IN with a gem fountain, a spark ring and a golden flash.
+- NEW SETTINGS: "Bet Progress Bar Effects" and "Screen Effects" (screen glows and shakes on wins and losses).
+- BOT (upload gd.js + restart).
+
 ## v2.22.2 - New icon
 - The mod's icon is now the Glimmer gem.
 

@@ -208,8 +208,12 @@ inline cocos2d::CCSprite* glimmerSprite(float px) {
 }
 
 // Soft coloured glow on the screen edges (centre stays clear).
+inline bool screenFx() { return Mod::get()->getSettingValue<bool>("screen-effects"); }
+inline bool barFx() { return Mod::get()->getSettingValue<bool>("bet-bar-effects"); }
+
 inline void edgeGlow(cocos2d::CCNode* scene, cocos2d::ccColor3B c, GLubyte edgeAlpha,
                      float in, float hold, float out) {
+    if (!screenFx()) return;
     const auto win = winSize();
     auto* holder = cocos2d::CCNode::create();
     holder->setID("sor-bet-glow"_spr);
@@ -239,6 +243,7 @@ inline void edgeGlow(cocos2d::CCNode* scene, cocos2d::ccColor3B c, GLubyte edgeA
 }
 
 inline cocos2d::CCAction* shake(float amp, int swings, float swingT) {
+    if (!screenFx()) return cocos2d::CCDelayTime::create(0.f);
     auto* arr = cocos2d::CCArray::create();
     for (int i = 0; i < swings; ++i) {
         const float a = amp * (1.f - static_cast<float>(i) / swings);
@@ -1096,17 +1101,20 @@ inline void attachBetBadge(PlayLayer* layer, std::int64_t levelId) {
 
 // --------------------------------------------- progress bar bet effects ----
 //
-// While a bet rides on the attempt, the vanilla progress bar becomes a
-// tension meter:
-//   * a gold tick + tiny glimmer gem mark the target % on the bar,
-//   * inside the last 25% before the target the fill heats from its normal
-//     colour to gold/orange, a glow pulses over the bar faster and faster,
-//     sparks fly off the fill tip and the % label warms up,
-//   * the last few % shake the marker,
-//   * crossing the target "locks in" the win: the marker flips green, the
-//     fill flashes, a spark ring bursts and a small "LOCKED IN" floats up.
-// Everything is parented to the progress bar itself so it follows GD's
-// bar position/rotation settings, and is restored when there is no bet.
+// While a bet rides on the attempt the progress bar turns into a golden
+// tension meter (Settings > "Bet Progress Bar Effects" turns it all off):
+//   * a gold target tick with a Glimmer gem on top and the target % under it,
+//   * from 30% away the fill melts into a molten-gold gradient, a light
+//     shine sweeps along it (faster the closer you get) and a golden halo
+//     breathes around the whole bar,
+//   * gold sparks spray off the fill tip, embers drift up off the fill and
+//     the % label shimmers gold and throbs,
+//   * the gem pings and the marker shivers in the last stretch, with a faint
+//     golden glow at the screen edges,
+//   * crossing the target LOCKS IN: white flash into solid shimmering gold,
+//     a fountain of gems and sparks from the marker, "LOCKED IN" pops up.
+// Everything is parented to the progress bar so it follows GD's bar
+// position settings, and is fully restored when there is no bet.
 class SorBetProgressFx : public cocos2d::CCNode {
 public:
     static SorBetProgressFx* create(PlayLayer* pl, std::int64_t levelId) {
@@ -1124,61 +1132,90 @@ public:
     void update(float dt) override {
         auto* pl = m_pl;
         if (!pl || !pl->m_progressBar || !pl->m_progressFill) return;
-        const bool live = activeBet().amount > 0 && activeBetLevel() == m_levelId && !pl->m_isPracticeMode;
+        const bool live = activeBet().amount > 0 && activeBetLevel() == m_levelId && !pl->m_isPracticeMode
+            && betfx::barFx();
         if (!live) { this->teardown(); return; }
 
         const int target = std::clamp(activeBet().targetPct, 1, 100);
         const float pct = std::clamp(pl->getCurrentPercent(), 0.f, 100.f);
 
         if (!m_built || target != m_target) this->build(target);
-        // new attempt (progress jumped back) -> re-arm
-        if (pct + 1.f < m_lastPct) { m_passed = false; this->resetLook(); }
+        if (pct + 1.f < m_lastPct) { m_passed = false; this->resetLook(); } // new attempt -> re-arm
         m_lastPct = pct;
         m_time += dt;
 
         auto* bar = pl->m_progressBar;
-        const float startX = pl->m_progressFill->getPositionX();
-        const float midY = bar->getContentHeight() / 2.f;
-        const float tipX = startX + pl->m_progressWidth * pct / 100.f;
+        const float fillW = std::max(0.f, pl->m_progressWidth * pct / 100.f);
+        const float tipX = m_startX + fillW;
 
-        if (!m_passed && pct >= static_cast<float>(target)) { this->lockIn(); return; }
-        if (m_passed) return;
+        if (!m_passed && pct >= static_cast<float>(target)) this->lockIn();
 
-        // closeness: 0 until 25% away, 1 at the target
-        const float c = std::clamp((pct - (target - 25.f)) / 25.f, 0.f, 1.f);
+        // closeness: 0 until 30% away, 1 at the target (eased); 1 once locked in
+        const float raw = m_passed ? 1.f : std::clamp((pct - (target - 30.f)) / 30.f, 0.f, 1.f);
+        const float c = raw * raw * (3.f - 2.f * raw);
+        const float wave = 0.5f + 0.5f * std::sin(m_time * (2.f + 10.f * c));
 
-        // fill heats: normal -> gold -> orange
-        const auto base = m_fillColor;
-        const cocos2d::ccColor3B hot = c < 0.6f
-            ? lerp(base, { 255, 215, 70 }, c / 0.6f)
-            : lerp({ 255, 215, 70 }, { 255, 120, 40 }, (c - 0.6f) / 0.4f);
-        pl->m_progressFill->setColor(hot);
+        // fill melts into gold
+        const cocos2d::ccColor3B gold { 255, 200, 50 }, amber { 255, 140, 20 };
+        if (!m_passed) pl->m_progressFill->setColor(lerp(m_fillColor, c > 0.8f ? lerp(gold, amber, (c - 0.8f) / 0.2f * wave) : gold, c));
+        else pl->m_progressFill->setColor(lerp(gold, { 255, 235, 140 }, wave));
 
-        // pulsing glow over the bar, faster as you close in
-        if (m_glow) {
-            const float rate = 1.5f + 9.f * c;
-            const float wave = 0.5f + 0.5f * std::sin(m_time * rate);
-            m_glow->setOpacity(static_cast<GLubyte>(c * (40.f + 90.f * wave)));
+        // molten gradient over the filled part
+        if (m_goldFill) {
+            m_goldFill->setContentSize({ fillW, m_fillH });
+            m_goldFill->setStartOpacity(static_cast<GLubyte>(c * (110.f + 70.f * wave)));
+            m_goldFill->setEndOpacity(static_cast<GLubyte>(c * 150.f));
         }
 
-        // % label warms up and throbs near the end
+        // shine sweep, faster the closer you are
+        if (m_shine) {
+            const float period = m_passed ? 0.9f : 1.9f - 1.3f * c;
+            m_shinePos += dt * (fillW + 30.f) / std::max(0.3f, period);
+            if (m_shinePos > fillW + 15.f) m_shinePos = -15.f;
+            const bool on = c > 0.03f && fillW > 6.f && m_shinePos < fillW - 4.f;
+            m_shine->setVisible(on);
+            m_shine->setPositionX(m_startX + m_shinePos);
+            m_shine->setOpacity(static_cast<GLubyte>(std::min(1.f, c * 1.3f) * 255.f));
+        }
+
+        // breathing halo around the bar
+        if (m_halo) {
+            m_halo->setColor(lerp(gold, amber, c > 0.8f ? (c - 0.8f) / 0.2f : 0.f));
+            m_halo->setOpacity(static_cast<GLubyte>(c * (35.f + 95.f * wave)));
+        }
+
+        // % label shimmers gold and throbs
         if (auto* lab = pl->m_percentageLabel) {
-            lab->setColor(lerp({ 255, 255, 255 }, { 255, 210, 80 }, c));
-            lab->setScale(m_labelScale * (1.f + (c > 0.7f ? 0.06f * (0.5f + 0.5f * std::sin(m_time * 14.f)) : 0.f)));
+            const float sh = 0.5f + 0.5f * std::sin(m_time * 6.f);
+            lab->setColor(lerp({ 255, 255, 255 }, lerp({ 255, 235, 130 }, { 255, 165, 30 }, sh), c));
+            const float throb = c > 0.6f ? 0.08f * c * (0.5f + 0.5f * std::sin(m_time * (10.f + 8.f * c))) : 0.f;
+            lab->setScale(m_labelScale * (1.f + throb));
         }
 
-        // marker shiver in the last stretch
+        // marker: grows, shivers at the end, gem pings
         if (m_marker) {
-            const float jitter = c > 0.85f ? std::sin(m_time * 60.f) * 1.2f * c : 0.f;
+            const float jitter = !m_passed && c > 0.8f ? std::sin(m_time * 60.f) * 1.5f * c : 0.f;
             m_marker->setPositionX(m_markerX + jitter);
-            m_marker->setScale(1.f + 0.25f * c);
+            m_marker->setScale(1.f + 0.35f * c);
+            if (m_gem) m_gem->setRotation(std::sin(m_time * 3.f) * 8.f * c);
+            m_pingAcc += dt;
+            if (!m_passed && c > 0.4f && m_pingAcc > 1.1f - 0.7f * c) { m_pingAcc = 0.f; this->ping(); }
         }
 
-        // sparks off the fill tip
-        m_sparkAcc += dt * (c * c * 22.f);
-        while (m_sparkAcc >= 1.f && c > 0.05f) {
-            m_sparkAcc -= 1.f;
-            this->spark(bar, { tipX, midY }, hot, 0.5f + c);
+        // sparks off the tip + embers off the fill
+        if (!m_passed) {
+            m_sparkAcc += dt * (c * c * 34.f);
+            while (m_sparkAcc >= 1.f && c > 0.05f) { m_sparkAcc -= 1.f; this->spark(bar, { tipX, m_fillY }, c); }
+        }
+        m_emberAcc += dt * (c > 0.35f ? (c - 0.35f) * 18.f : 0.f);
+        while (m_emberAcc >= 1.f) { m_emberAcc -= 1.f; this->ember(bar, m_startX + fillW * (std::rand() % 1000) / 1000.f); }
+
+        // faint golden glow at the screen edges in the last stretch
+        m_edgeAcc += dt;
+        if (!m_passed && c > 0.85f && m_edgeAcc > 1.2f) {
+            m_edgeAcc = 0.f;
+            if (auto* scene = cocos2d::CCDirector::get()->getRunningScene())
+                betfx::edgeGlow(scene, { 255, 190, 50 }, static_cast<GLubyte>(45.f * c), 0.2f, 0.1f, 0.7f);
         }
     }
 
@@ -1189,6 +1226,13 @@ private:
                  static_cast<GLubyte>(a.g + (b.g - a.g) * t),
                  static_cast<GLubyte>(a.b + (b.b - a.b) * t) };
     }
+    static cocos2d::CCLayerColor* dot(cocos2d::ccColor3B col, float w, float h) {
+        auto* d = cocos2d::CCLayerColor::create({ col.r, col.g, col.b, 255 }, w, h);
+        d->ignoreAnchorPointForPosition(false);
+        d->setAnchorPoint({ .5f, .5f });
+        d->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
+        return d;
+    }
 
     void build(int target) {
         this->teardown();
@@ -1197,68 +1241,131 @@ private:
         m_target = target;
         m_fillColor = pl->m_progressFill->getColor();
         if (pl->m_percentageLabel) m_labelScale = pl->m_percentageLabel->getScale();
-        const float h = bar->getContentHeight();
-        const float startX = pl->m_progressFill->getPositionX();
-        m_markerX = startX + pl->m_progressWidth * target / 100.f;
+        const float w = bar->getContentWidth(), h = bar->getContentHeight();
+        const auto fr = pl->m_progressFill->boundingBox();
+        m_startX = pl->m_progressFill->getPositionX();
+        m_fillH = std::max(2.f, fr.size.height);
+        m_fillY = fr.getMidY();
+        m_markerX = m_startX + pl->m_progressWidth * target / 100.f;
 
+        // halo behind the bar frame
+        m_halo = cocos2d::CCLayerColor::create({ 255, 200, 60, 0 }, w + 12.f, h + 12.f);
+        m_halo->setPosition({ -6.f, -6.f });
+        m_halo->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
+        bar->addChild(m_halo, -1);
+
+        // molten gradient (light gold on top, deep amber at the bottom)
+        m_goldFill = cocos2d::CCLayerGradient::create({ 255, 245, 170, 0 }, { 255, 130, 0, 0 });
+        m_goldFill->setContentSize({ 0.f, m_fillH });
+        m_goldFill->setPosition({ m_startX, m_fillY - m_fillH / 2.f });
+        m_goldFill->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
+        bar->addChild(m_goldFill, 40);
+
+        // shine: a soft white-gold stripe (two mirrored gradients)
+        m_shine = cocos2d::CCNodeRGBA::create();
+        m_shine->setCascadeOpacityEnabled(true);
+        m_shine->setPosition({ m_startX, m_fillY - m_fillH / 2.f });
+        for (int side = 0; side < 2; ++side) {
+            auto* g = cocos2d::CCLayerGradient::create(
+                side == 0 ? cocos2d::ccColor4B { 255, 250, 210, 0 } : cocos2d::ccColor4B { 255, 250, 210, 220 },
+                side == 0 ? cocos2d::ccColor4B { 255, 250, 210, 220 } : cocos2d::ccColor4B { 255, 250, 210, 0 },
+                { 1.f, 0.f });
+            g->setContentSize({ 9.f, m_fillH });
+            g->setPosition({ side == 0 ? -9.f : 0.f, 0.f });
+            g->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
+            m_shine->addChild(g);
+        }
+        m_shine->setVisible(false);
+        bar->addChild(m_shine, 42);
+
+        // target marker: gold tick, gem above, target % below
         m_marker = cocos2d::CCNodeRGBA::create();
         m_marker->setCascadeOpacityEnabled(true);
-        m_marker->setCascadeColorEnabled(true);
         m_marker->setPosition({ m_markerX, h / 2.f });
         bar->addChild(m_marker, 50);
-
-        auto* tick = cocos2d::CCLayerColor::create({ 255, 255, 255, 255 }, 2.f, h + 6.f);
-        tick->ignoreAnchorPointForPosition(false);
-        tick->setAnchorPoint({ .5f, .5f });
+        auto* tick = cocos2d::CCLayerGradient::create({ 255, 250, 200, 255 }, { 255, 160, 20, 255 });
+        tick->setContentSize({ 2.f, h + 6.f });
+        tick->setPosition({ -1.f, -(h + 6.f) / 2.f });
         m_marker->addChild(tick);
-        if (auto* gem = betfx::glimmerSprite(9.f)) {
-            gem->setPosition({ 0.f, h / 2.f + 8.f });
-            m_marker->addChild(gem);
+        if ((m_gem = betfx::glimmerSprite(10.f))) {
+            m_gem->setPosition({ 0.f, h / 2.f + 9.f });
+            m_marker->addChild(m_gem);
         }
-        m_marker->setColor({ 255, 210, 70 });
-
-        m_glow = cocos2d::CCLayerColor::create({ 255, 190, 60, 0 }, bar->getContentWidth(), h);
-        m_glow->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
-        bar->addChild(m_glow, 40);
+        auto* tl = CCLabelBMFont::create(fmt::format("{}%", target).c_str(), "goldFont.fnt");
+        tl->setScale(0.32f);
+        tl->setPosition({ 0.f, -h / 2.f - 7.f });
+        m_marker->addChild(tl);
 
         m_built = true;
         m_passed = false;
+        m_shinePos = -15.f;
     }
 
     void resetLook() {
         auto* pl = m_pl;
-        if (!pl) return;
-        if (pl->m_progressFill && m_built) pl->m_progressFill->setColor(m_fillColor);
-        if (pl->m_percentageLabel && m_built) {
+        if (!pl || !m_built) return;
+        if (pl->m_progressFill) { pl->m_progressFill->stopAllActions(); pl->m_progressFill->setColor(m_fillColor); }
+        if (pl->m_percentageLabel) {
             pl->m_percentageLabel->setColor({ 255, 255, 255 });
             pl->m_percentageLabel->setScale(m_labelScale);
         }
-        if (m_marker) { m_marker->setColor({ 255, 210, 70 }); m_marker->setScale(1.f); m_marker->setPositionX(m_markerX); }
-        if (m_glow) m_glow->setOpacity(0);
+        if (m_marker) { m_marker->setScale(1.f); m_marker->setPositionX(m_markerX); }
+        if (m_halo) m_halo->setOpacity(0);
+        if (m_goldFill) { m_goldFill->setStartOpacity(0); m_goldFill->setEndOpacity(0); }
+        if (m_shine) m_shine->setVisible(false);
     }
 
     void teardown() {
         if (!m_built) return;
         this->resetLook();
-        if (m_marker) { m_marker->removeFromParent(); m_marker = nullptr; }
-        if (m_glow) { m_glow->removeFromParent(); m_glow = nullptr; }
+        for (cocos2d::CCNode* n : { static_cast<cocos2d::CCNode*>(m_marker), static_cast<cocos2d::CCNode*>(m_halo),
+                                    static_cast<cocos2d::CCNode*>(m_goldFill), static_cast<cocos2d::CCNode*>(m_shine) })
+            if (n) n->removeFromParent();
+        m_marker = nullptr; m_halo = nullptr; m_goldFill = nullptr; m_shine = nullptr; m_gem = nullptr;
         m_built = false;
         m_passed = false;
     }
 
-    void spark(cocos2d::CCNode* bar, cocos2d::CCPoint at, cocos2d::ccColor3B col, float power) {
-        auto* s = cocos2d::CCLayerColor::create({ col.r, col.g, col.b, 255 }, 2.f, 2.f);
-        s->ignoreAnchorPointForPosition(false);
-        s->setAnchorPoint({ .5f, .5f });
+    void spark(cocos2d::CCNode* bar, cocos2d::CCPoint at, float c) {
+        const cocos2d::ccColor3B cols[] = { { 255, 240, 160 }, { 255, 200, 50 }, { 255, 150, 30 } };
+        auto* s = dot(cols[std::rand() % 3], 2.f, 2.f);
         s->setPosition(at + cocos2d::CCPoint { 0.f, static_cast<float>((std::rand() % 7) - 3) });
-        s->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
         bar->addChild(s, 45);
-        const float dx = -6.f - static_cast<float>(std::rand() % 14);
-        const float dy = static_cast<float>((std::rand() % 25) - 12) * power;
+        const float dx = -4.f - static_cast<float>(std::rand() % 18);
+        const float dy = static_cast<float>((std::rand() % 31) - 15) * (0.6f + c);
+        const float t = 0.3f + (std::rand() % 25) / 100.f;
         s->runAction(cocos2d::CCSequence::create(
             cocos2d::CCSpawn::create(
-                cocos2d::CCEaseOut::create(cocos2d::CCMoveBy::create(0.35f, { dx, dy }), 2.f),
-                cocos2d::CCFadeOut::create(0.35f), nullptr),
+                cocos2d::CCEaseOut::create(cocos2d::CCMoveBy::create(t, { dx, dy }), 2.f),
+                cocos2d::CCScaleTo::create(t, 0.3f),
+                cocos2d::CCFadeOut::create(t), nullptr),
+            cocos2d::CCRemoveSelf::create(), nullptr));
+    }
+
+    void ember(cocos2d::CCNode* bar, float x) {
+        auto* e = dot({ 255, 215, 90 }, 1.5f, 1.5f);
+        e->setPosition({ x, m_fillY + m_fillH / 2.f });
+        bar->addChild(e, 44);
+        const float t = 0.6f + (std::rand() % 50) / 100.f;
+        e->runAction(cocos2d::CCSequence::create(
+            cocos2d::CCSpawn::create(
+                cocos2d::CCMoveBy::create(t, { static_cast<float>((std::rand() % 9) - 4), 10.f + (std::rand() % 12) }),
+                cocos2d::CCFadeOut::create(t), nullptr),
+            cocos2d::CCRemoveSelf::create(), nullptr));
+    }
+
+    // a ghost gem that swells off the marker
+    void ping() {
+        if (!m_marker || !m_gem) return;
+        auto* g = betfx::glimmerSprite(10.f);
+        if (!g) return;
+        const float s0 = g->getScale();
+        g->setPosition(m_gem->getPosition());
+        g->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
+        g->setColor({ 255, 220, 120 });
+        m_marker->addChild(g, -1);
+        g->runAction(cocos2d::CCSequence::create(
+            cocos2d::CCSpawn::create(cocos2d::CCScaleTo::create(0.5f, s0 * 2.2f), cocos2d::CCFadeOut::create(0.5f), nullptr),
             cocos2d::CCRemoveSelf::create(), nullptr));
     }
 
@@ -1267,54 +1374,58 @@ private:
         auto* pl = m_pl;
         auto* bar = pl->m_progressBar;
         const float h = bar->getContentHeight();
-        const cocos2d::ccColor3B green { 110, 255, 130 };
+        const cocos2d::ccColor3B gold { 255, 205, 60 };
 
-        if (m_glow) {
-            m_glow->setColor(green);
-            m_glow->setOpacity(200);
-            m_glow->runAction(cocos2d::CCFadeTo::create(0.6f, 0));
-        }
-        pl->m_progressFill->setColor({ 255, 255, 255 });
-        pl->m_progressFill->runAction(cocos2d::CCTintTo::create(0.5f, green.r, green.g, green.b));
+        if (m_halo) { m_halo->setColor({ 255, 240, 170 }); m_halo->setOpacity(230); }
         if (auto* lab = pl->m_percentageLabel) {
-            lab->setColor(green);
-            lab->setScale(m_labelScale);
             lab->runAction(cocos2d::CCSequence::create(
-                cocos2d::CCScaleTo::create(0.08f, m_labelScale * 1.25f),
-                cocos2d::CCScaleTo::create(0.2f, m_labelScale), nullptr));
+                cocos2d::CCScaleTo::create(0.08f, m_labelScale * 1.35f),
+                cocos2d::CCEaseBackOut::create(cocos2d::CCScaleTo::create(0.3f, m_labelScale)), nullptr));
         }
         if (m_marker) {
-            m_marker->setPositionX(m_markerX);
-            m_marker->setColor(green);
             m_marker->runAction(cocos2d::CCSequence::create(
-                cocos2d::CCScaleTo::create(0.08f, 1.7f),
-                cocos2d::CCScaleTo::create(0.25f, 1.f), nullptr));
+                cocos2d::CCScaleTo::create(0.08f, 2.f),
+                cocos2d::CCEaseBackOut::create(cocos2d::CCScaleTo::create(0.35f, 1.3f)), nullptr));
         }
-        for (int i = 0; i < 14; ++i) {
-            const float a = i * 0.4488f;
-            auto* s = cocos2d::CCLayerColor::create({ green.r, green.g, green.b, 255 }, 2.f, 2.f);
-            s->ignoreAnchorPointForPosition(false);
-            s->setAnchorPoint({ .5f, .5f });
-            s->setPosition({ m_markerX, h / 2.f });
-            s->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
-            bar->addChild(s, 46);
-            s->runAction(cocos2d::CCSequence::create(
+        // fountain of gems + sparks from the marker
+        for (int i = 0; i < 10; ++i) {
+            auto* g = betfx::glimmerSprite(7.f + (std::rand() % 4));
+            if (!g) break;
+            g->setPosition({ m_markerX, h / 2.f + 6.f });
+            bar->addChild(g, 48);
+            const float dx = static_cast<float>((std::rand() % 81) - 40);
+            const float t = 0.6f + (std::rand() % 30) / 100.f;
+            g->runAction(cocos2d::CCSequence::create(
                 cocos2d::CCSpawn::create(
-                    cocos2d::CCEaseOut::create(cocos2d::CCMoveBy::create(0.45f, { std::cos(a) * 22.f, std::sin(a) * 14.f }), 2.f),
-                    cocos2d::CCFadeOut::create(0.45f), nullptr),
+                    cocos2d::CCJumpBy::create(t, { dx, -6.f - (std::rand() % 10) }, 22.f + (std::rand() % 18), 1),
+                    cocos2d::CCRotateBy::create(t, static_cast<float>((std::rand() % 360) - 180)),
+                    cocos2d::CCSequence::create(cocos2d::CCDelayTime::create(t * 0.55f), cocos2d::CCFadeOut::create(t * 0.45f), nullptr),
+                    nullptr),
                 cocos2d::CCRemoveSelf::create(), nullptr));
         }
-        auto* tag = CCLabelBMFont::create("LOCKED IN", "bigFont.fnt");
-        tag->setScale(0.3f);
-        tag->setColor(green);
-        tag->setPosition({ m_markerX, h / 2.f + 22.f });
+        for (int i = 0; i < 22; ++i) {
+            const float a = i * 0.2856f;
+            auto* s = dot(i % 2 ? gold : cocos2d::ccColor3B { 255, 250, 210 }, 2.f, 2.f);
+            s->setPosition({ m_markerX, h / 2.f });
+            bar->addChild(s, 46);
+            const float r = 18.f + (std::rand() % 14);
+            s->runAction(cocos2d::CCSequence::create(
+                cocos2d::CCSpawn::create(
+                    cocos2d::CCEaseOut::create(cocos2d::CCMoveBy::create(0.5f, { std::cos(a) * r, std::sin(a) * r * 0.7f }), 2.f),
+                    cocos2d::CCFadeOut::create(0.5f), nullptr),
+                cocos2d::CCRemoveSelf::create(), nullptr));
+        }
+        auto* tag = CCLabelBMFont::create("LOCKED IN!", "goldFont.fnt");
+        tag->setScale(0.f);
+        tag->setPosition({ m_markerX, h / 2.f + 26.f });
         bar->addChild(tag, 47);
         tag->runAction(cocos2d::CCSequence::create(
-            cocos2d::CCDelayTime::create(0.5f),
-            cocos2d::CCSpawn::create(
-                cocos2d::CCMoveBy::create(0.6f, { 0.f, 10.f }),
-                cocos2d::CCFadeOut::create(0.6f), nullptr),
+            cocos2d::CCEaseBackOut::create(cocos2d::CCScaleTo::create(0.25f, 0.5f)),
+            cocos2d::CCDelayTime::create(0.6f),
+            cocos2d::CCSpawn::create(cocos2d::CCMoveBy::create(0.6f, { 0.f, 12.f }), cocos2d::CCFadeOut::create(0.6f), nullptr),
             cocos2d::CCRemoveSelf::create(), nullptr));
+        if (auto* scene = cocos2d::CCDirector::get()->getRunningScene())
+            betfx::edgeGlow(scene, { 255, 200, 60 }, 110, 0.06f, 0.15f, 0.6f);
         playGlimmerSound(1.25f, 0.9f);
     }
 
@@ -1322,10 +1433,15 @@ private:
     std::int64_t m_levelId = 0;
     bool m_built = false, m_passed = false;
     int m_target = 0;
-    float m_markerX = 0.f, m_lastPct = 0.f, m_time = 0.f, m_sparkAcc = 0.f, m_labelScale = 0.5f;
+    float m_markerX = 0.f, m_startX = 0.f, m_fillH = 4.f, m_fillY = 0.f;
+    float m_lastPct = 0.f, m_time = 0.f, m_sparkAcc = 0.f, m_emberAcc = 0.f, m_pingAcc = 0.f, m_edgeAcc = 0.f;
+    float m_shinePos = -15.f, m_labelScale = 0.5f;
     cocos2d::ccColor3B m_fillColor { 255, 255, 255 };
     cocos2d::CCNodeRGBA* m_marker = nullptr;
-    cocos2d::CCLayerColor* m_glow = nullptr;
+    cocos2d::CCSprite* m_gem = nullptr;
+    cocos2d::CCLayerColor* m_halo = nullptr;
+    cocos2d::CCLayerGradient* m_goldFill = nullptr;
+    cocos2d::CCNodeRGBA* m_shine = nullptr;
 };
 
 inline void attachBetProgressFx(PlayLayer* layer, std::int64_t levelId) {

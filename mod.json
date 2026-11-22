@@ -8,7 +8,7 @@
 	},
 	"id": "endrosity.sorrow-integration",
 	"name": "Sorrow Integration",
-	"version": "v2.22.2",
+	"version": "v2.23.0",
 	"developer": "endrosity",
 	"description": "Glimmer betting, roulette (solo + multiplayer rooms), daily and weekly challenges, and Globed support - all connected to the Sorrow Discord bot.",
 	"tags": [
@@ -24,6 +24,18 @@
 		}
 	},
 	"settings": {
+		"bet-bar-effects": {
+			"name": "Bet Progress Bar Effects",
+			"description": "Golden progress bar effects that build up as you get closer to the percent you bet on.",
+			"type": "bool",
+			"default": true
+		},
+		"screen-effects": {
+			"name": "Screen Effects",
+			"description": "Screen glows and shakes when you win or lose a bet.",
+			"type": "bool",
+			"default": true
+		},
 		"show-hud": {
 			"name": "Show HUD",
 			"description": "Display the roulette HUD (target percent, deaths, best, Glimmer) while a session is active.",
