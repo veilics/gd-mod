@@ -1,3 +1,6 @@
+## v2.22.1 - Missing textures fix
+- FIXED icons, the roulette button, the background, the Glimmer gem and the win/coin sounds not loading in builds made from GitHub (Windows, macOS, the all-platforms file). The resource list pointed at the wrong folder, so those builds shipped without any of the mod's images or sounds.
+
 ## v2.22.0 - Rooms close properly + whole-roulette room bets
 - FIXED rooms staying open after closing or restarting the game. Your game now checks in with the bot while you're in a room; if it stops (game closed, crashed, restarted) you're removed after 60 seconds, the host role moves to the next player, and an empty room closes. Starting the game also leaves any room you were still in.
 - ROOM BETS pay out at the end of the WHOLE roulette, not after a round. When the game ends you get the same animations as a normal bet: the gem fountain and green count-up when you win, the red count-down when you lose. Globed shows WIN / LOSS under your icon, and a notification tells you the result.
