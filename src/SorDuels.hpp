@@ -334,7 +334,7 @@ inline void sideBet(const std::string& id, const std::string& on, std::int64_t a
     call("duels/bet", b, cb, false);
 }
 
-struct FoundPlayer { std::string uid, name, rank; int acc = 0, elo = 1000, w = 0, l = 0; bool near = false, busy = false; };
+struct FoundPlayer { std::string uid, name, rank; int acc = 0, elo = 1000, w = 0, l = 0; bool nearby = false, busy = false; };
 inline void find(const std::string& query, std::function<void(std::vector<FoundPlayer>)> cb) {
     auto b = idBody();
     b.set("query", query);

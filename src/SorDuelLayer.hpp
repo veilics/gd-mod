@@ -146,7 +146,7 @@ protected:
             auto* rk = label(fmt::format("{} {}  -  {}W {}L", f.rank, f.elo, f.w, f.l), "goldFont.fnt", .38f, rankColor(f.rank), { 0.f, .5f });
             rk->setPosition({ 25.f, y - 6.f });
             m_list->addChild(rk);
-            if (f.near) {
+            if (f.nearby) {
                 auto* tag = label("NEARBY", "bigFont.fnt", .25f, { 120, 230, 255 });
                 tag->setPosition({ 175.f, y });
                 m_list->addChild(tag);
@@ -823,7 +823,7 @@ private:
                 auto p = self.lock();
                 if (!p) return;
                 p->m_nearbyBusy = false;
-                std::erase_if(f, [](auto& x) { return !x.near; });
+                std::erase_if(f, [](auto& x) { return !x.nearby; });
                 const bool diff = f.size() != p->m_nearby.size();
                 p->m_nearby = std::move(f);
                 if (diff) p->refresh(true);
