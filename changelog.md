@@ -1,3 +1,10 @@
+## v2.22.0 - Rooms close properly + whole-roulette room bets
+- FIXED rooms staying open after closing or restarting the game. Your game now checks in with the bot while you're in a room; if it stops (game closed, crashed, restarted) you're removed after 60 seconds, the host role moves to the next player, and an empty room closes. Starting the game also leaves any room you were still in.
+- ROOM BETS pay out at the end of the WHOLE roulette, not after a round. When the game ends you get the same animations as a normal bet: the gem fountain and green count-up when you win, the red count-down when you lose. Globed shows WIN / LOSS under your icon, and a notification tells you the result.
+- Per-attempt bets are turned off on a room's round levels so they can't resolve after round 1 - your room bet covers the game.
+- Description rewritten around the mod's features.
+- BOT (upload gd.js + restart).
+
 ## v2.21.1 - UI fixes + challenge rebalance
 - FIXED the dark stripe through rows, badges and the in-level room scoreboard: square02b panels shorter than their own corners drew a negative middle slice. Every panel now goes through one helper that keeps the corners intact at any size.
 - FIXED overlapping buttons: Solo list tabs and rarity chips are laid out from their real rendered widths; Leave / History sit right after the room name; challenge Play and reroll no longer touch.

@@ -92,6 +92,9 @@ struct ActiveRoom
     std::int64_t pot = 0;
     std::int64_t myBet = 0;
     bool imReady = false;
+    // Your result for the last finished game (whole roulette, all rounds).
+    int gameSeq = 0;
+    struct Result { int game = 0; std::int64_t stake = 0, payout = 0; bool won = false, refunded = false; } myResult;
     LastRound lastRound;
     std::string winnerId;
     std::string winnerName;
@@ -150,6 +153,15 @@ inline void applyRoomJson(const matjson::Value& r, ActiveRoom& out) {
     out.isHost = !out.hostId.empty() && out.hostId == discordId();
     out.state = r["state"].asString().unwrapOr("lobby");
     out.pot = static_cast<std::int64_t>(r["pot"].asInt().unwrapOr(0));
+    out.gameSeq = static_cast<int>(r["gameSeq"].asInt().unwrapOr(0));
+    if (r["myResult"].isObject()) {
+        const auto& mr = r["myResult"];
+        out.myResult.game = static_cast<int>(mr["game"].asInt().unwrapOr(0));
+        out.myResult.stake = static_cast<std::int64_t>(mr["stake"].asInt().unwrapOr(0));
+        out.myResult.payout = static_cast<std::int64_t>(mr["payout"].asInt().unwrapOr(0));
+        out.myResult.won = mr["won"].asBool().unwrapOr(false);
+        out.myResult.refunded = mr["refunded"].asBool().unwrapOr(false);
+    }
     out.progressive = r["progressive"].asBool().unwrapOr(true);
     out.source = r["source"].asString().unwrapOr("regular");
     out.rarity = r["rarity"].asString().unwrapOr("");
@@ -567,8 +579,22 @@ inline void leave(const std::function<void(bool)>& cb = nullptr) {
     });
 }
 
+// Called once when the game starts: a restarted / previously closed game is
+// no longer in any room, so drop whatever room the bot still has us in.
+inline void leaveStaleRooms() {
+    static bool done = false;
+    if (done || state().active) return;
+    if (discordId().empty() && gdAccountId().empty()) return;
+    done = true;
+    Bridge::post("rooms/leaveAll", idBody(), [](bool, int, matjson::Value) {});
+}
+
 inline void fetchRoom(const std::string& code, const std::function<void(bool, matjson::Value)>& cb) {
-    Bridge::get("rooms", [code, cb](bool ok, int, matjson::Value body) {
+    // Sending who you are + your room code doubles as the presence heartbeat:
+    // a game that stops polling (closed / crashed) is dropped by the bot.
+    const auto path = fmt::format("rooms?code={}&discordId={}&gdAccountId={}",
+        Bridge::q(code), Bridge::q(discordId()), Bridge::q(gdAccountId()));
+    Bridge::get(path, [code, cb](bool ok, int, matjson::Value body) {
         if (!ok || !body.isObject()) { cb(false, {}); return; }
         if (auto arr = body["rooms"].asArray()) {
             for (const auto& r : *arr)
@@ -648,9 +674,7 @@ inline void bet(std::int64_t amount, const std::function<void(bool, std::int64_t
     });
 }
 
-// Game-result presentation guard (the reporter's reply and the director's
-// poll can both see the same finish).
-inline std::string& presentedFinishKey() { static std::string s; return s; }
+inline void pokeDirector(); // defined after RoomDirector
 
 // Every death / completion on the CURRENT round level goes to the bot; the
 // bot decides whether it wins the round.
@@ -682,13 +706,8 @@ inline void reportProgress(int levelId, const std::string& levelName, int percen
             Notification::create(fmt::format("Cleared {}% - you survive round {}", state().target, roundBefore).c_str(),
                 NotificationIcon::Success, 2.f)->show();
         }
-        if (gameOver && potWon > 0) {
-            presentedFinishKey() = state().code + "#" + state().winnerId + "#" + std::to_string(state().lastRound.round);
-            syncBalance([potWon](bool ok2, int, matjson::Value bb) {
-                if (ok2 && bb.isObject()) setGlimmer(bb["balance"].asInt().unwrapOr(-1), 0);
-                presentGlimmerWin(potWon, 0, nullptr);
-            });
-        }
+        if (gameOver) pokeDirector(); // the director plays the win / loss for the whole game
+        (void)potWon;
         (void)potBefore;
     });
 }
@@ -709,6 +728,14 @@ public:
     static RoomDirector* get() {
         static RoomDirector* s = [] {
             auto* d = new RoomDirector();
+            // Room games pay out once, at the end of the whole roulette: no
+            // per-attempt bets on a room's round level.
+            attemptBetBlocker() = [](std::int64_t levelId) -> std::string {
+                const auto& st = state();
+                if (st.active && st.state == "playing" && st.levelId == levelId)
+                    return "This is a room level - your room bet pays out at the end of the whole roulette";
+                return "";
+            };
             cocos2d::CCDirector::get()->getScheduler()->scheduleSelector(
                 schedule_selector(RoomDirector::tick), d, 0.5f, false);
             return d;
@@ -725,6 +752,7 @@ public:
     void travelNow() { m_travelIn = 0.01f; }
 
     void tick(float dt) {
+        leaveStaleRooms(); // once, as soon as we know who we are
         if (m_travelIn > 0.f) {
             m_travelIn -= dt;
             if (m_travelIn <= 0.f) { m_travelIn = 0.f; this->goToRoundLevel(); }
@@ -792,25 +820,55 @@ public:
             if (!out) this->scheduleTravel();
         }
 
-        // 3) game over -> pot animation if it is ours, then back to the room screen
-        if (b.state == "finished" && a.state == "playing") {
-            const auto key = b.code + "#" + b.winnerId + "#" + std::to_string(b.lastRound.round);
-            const bool won = std::find(b.winners.begin(), b.winners.end(), me) != b.winners.end();
-            if (won && presentedFinishKey() != key) {
-                presentedFinishKey() = key;
-                const auto n = std::max<std::int64_t>(1, static_cast<std::int64_t>(b.winners.size()));
-                const auto amount = a.pot / n + a.myBet; // room rule: your share + your own bet again
-                syncBalance([amount](bool ok, int, matjson::Value bb) {
-                    if (ok && bb.isObject()) setGlimmer(bb["balance"].asInt().unwrapOr(-1), 0);
-                    if (amount > 0) presentGlimmerWin(amount, 0, nullptr);
-                });
-            } else if (!won) {
-                refreshBalance();
-            }
+        // 3) game over -> your result for the WHOLE roulette (all rounds), once
+        //    per game, then back to the room screen. Keyed by the bot's game
+        //    number, so it fires even when our own progress reply already
+        //    moved the room to "finished".
+        if (!a.active || a.code != b.code) m_seenGame = b.gameSeq; // just joined: no replay of old games
+        if (b.gameSeq > m_seenGame) {
+            m_seenGame = b.gameSeq;
+            this->presentResult(b);
             m_seenLevel = 0;
             m_travelIn = 0.f;
-            m_returnIn = won ? 3.5f : 2.f; // let the result/animation play, then go back
+            const bool inLevel = PlayLayer::get() != nullptr ||
+                (cocos2d::CCDirector::get()->getRunningScene() &&
+                 cocos2d::CCDirector::get()->getRunningScene()->getChildByType<LevelInfoLayer>(0));
+            const bool animated = b.myResult.game == b.gameSeq && b.myResult.stake > 0 && !b.myResult.refunded;
+            if (inLevel) m_returnIn = animated ? 4.8f : 2.f; // let the animation play, then go back
         }
+    }
+
+    void presentResult(const ActiveRoom& b) {
+        const auto& res = b.myResult;
+        const bool mine = res.game == b.gameSeq;
+        const bool won = std::find(b.winners.begin(), b.winners.end(), discordId()) != b.winners.end();
+        const int myPct = [&] { const int i = b.indexOf(discordId()); return i >= 0 ? b.playerPercents[i] : 0; }();
+        if (mine && res.refunded) {
+            if (res.stake > 0) Notification::create(fmt::format("Nobody scored - your {} bet came back",
+                sorrow::formatGlimmer(res.stake)).c_str(), NotificationIcon::Info, 2.5f)->show();
+            refreshBalance();
+            return;
+        }
+        if (won) {
+            Notification::create(res.payout > 0
+                ? fmt::format("You won the roulette! +{}", sorrow::formatGlimmer(res.payout)).c_str()
+                : "You won the roulette!", NotificationIcon::Success, 3.f)->show();
+        } else if (mine && res.stake > 0) {
+            Notification::create(fmt::format("{} won the roulette - you lost your {} bet",
+                b.winnerName.empty() ? std::string("Someone") : b.winnerName,
+                sorrow::formatGlimmer(res.stake)).c_str(), NotificationIcon::Error, 3.f)->show();
+        }
+        if (mine && res.stake > 0 && PlayLayer::get()) announceBetResult(won, myPct); // Globed WIN / LOSS label
+        const auto payout = mine ? res.payout : 0;
+        const auto stake = mine ? res.stake : 0;
+        syncBalance([won, payout, stake, myPct, target = b.target](bool ok, int, matjson::Value bb) {
+            const auto bal = ok && bb.isObject() ? bb["balance"].asInt().unwrapOr(-1) : -1;
+            Loader::get()->queueInMainThread([=] {
+                if (bal >= 0) setGlimmer(bal, 0);
+                if (won && payout > 0) presentGlimmerWin(payout, stake, nullptr);
+                else if (!won && stake > 0) presentBetLoss(stake, myPct, target, nullptr);
+            });
+        });
     }
 
     // Set by the roulette screen: open the rooms popup on it (returns false
@@ -883,7 +941,10 @@ private:
     int m_seenEvent = 0;
     bool m_opening = false;
     int m_seenLevel = 0, m_seenRound = 0, m_seenRoundWin = 0;
+    int m_seenGame = 0;
 };
+
+inline void pokeDirector() { RoomDirector::get()->pokeNow(); }
 
 
 // ------------------------------------------------------- in-level room hud --

@@ -730,7 +730,7 @@ protected:
             sorrow::rooms::bet(amount, [self, amount](bool ok, std::int64_t, std::string err) {
                 if (!self->getParent()) return;
                 if (!ok) { self->setStatus(err); return; }
-                self->setStatus(fmt::format("Bet {} - most round wins takes the pot", sorrow::formatGlimmer(amount)));
+                self->setStatus(fmt::format("Bet {} - pays out when the whole roulette ends", sorrow::formatGlimmer(amount)));
                 Notification::create(fmt::format("Room bet placed: {}", sorrow::formatGlimmer(amount)).c_str(),
                     NotificationIcon::Success, 1.f)->show();
             });

@@ -562,11 +562,21 @@ inline void resolveAttemptBet(std::int64_t levelId, int percent, bool completed,
     });
 }
 
+// Set by the room code: returns a reason when attempt bets are not allowed
+// on this level (empty = allowed).
+inline std::function<std::string(std::int64_t)>& attemptBetBlocker() {
+    static std::function<std::string(std::int64_t)> f;
+    return f;
+}
+
 inline void placeAttemptBet(std::int64_t levelId, std::int64_t amount, int targetPct,
                             const std::string& bucket, int minTarget,
                             const std::function<void(bool, const std::string&)>& cb = nullptr) {
     // One bet per attempt: refuse while a bet is live for this level or a
     // placement request is still on its way (double taps, recurring re-arm).
+    if (auto& block = attemptBetBlocker(); block) {
+        if (auto why = block(levelId); !why.empty()) { if (cb) cb(false, why); return; }
+    }
     if (betInFlight()) { if (cb) cb(false, "A bet is already being placed"); return; }
     if (activeBet().amount > 0 && activeBetLevel() == levelId) {
         if (cb) cb(false, "You already have a bet on this attempt");
@@ -1339,6 +1349,12 @@ public:
         return ret;
     }
     void onBet(CCObject*) {
+        if (auto& block = attemptBetBlocker(); block) {
+            if (auto why = block(m_levelId); !why.empty()) {
+                Notification::create(why.c_str(), NotificationIcon::Info, 2.5f)->show();
+                return;
+            }
+        }
         if (auto p = SorAttemptBetPopup::create(m_levelId, m_rules)) p->show();
     }
 };
