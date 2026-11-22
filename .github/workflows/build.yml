@@ -1,9 +1,14 @@
 name: Build Sorrow Integration
 
+# Based on geode-sdk/build-geode-mod's official multi-platform example.
+# Each platform uploads its own .geode (e.g. "Windows"), and the "package"
+# job merges all of them into one .geode that works on every platform.
+
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  push:
+    branches:
+      - "**"
 
 jobs:
   build:
@@ -11,21 +16,23 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - name: Windows
-            os: windows-latest
-            id: win
-          - name: macOS
-            os: macos-latest
-            id: mac
-          - name: Android 64
-            os: ubuntu-latest
-            id: android64
-          - name: Android 32
-            os: ubuntu-latest
-            id: android32
-          - name: iOS
-            os: macos-latest
-            id: ios
+        - name: Windows
+          os: windows-latest
+
+        - name: macOS
+          os: macos-latest
+
+        - name: iOS
+          os: macos-latest
+          target: iOS
+
+        - name: Android32
+          os: ubuntu-latest
+          target: Android32
+
+        - name: Android64
+          os: ubuntu-latest
+          target: Android64
 
     name: ${{ matrix.config.name }}
     runs-on: ${{ matrix.config.os }}
@@ -33,15 +40,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and package the mod
+      - name: Build the mod
         id: build
         uses: geode-sdk/build-geode-mod@main
         with:
-          build-dir: build
-          target: ${{ matrix.config.id }}
+          combine: true
+          target: ${{ matrix.config.target }}
 
-      - name: Upload artifact
+      - name: Upload this platform's .geode
         uses: actions/upload-artifact@v4
         with:
-          name: sorrow-integration-${{ matrix.config.id }}
-          path: ${{ steps.build.outputs.package-path }}
+          name: Sorrow-Integration-${{ matrix.config.name }}
+          path: ${{ steps.build.outputs.build-output }}
+
+  package:
+    name: Package builds
+    runs-on: ubuntu-latest
+    needs: ['build']
+
+    steps:
+      - uses: geode-sdk/build-geode-mod/combine@main
+        id: build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sorrow-Integration-All-Platforms
+          path: ${{ steps.build.outputs.build-output }}
