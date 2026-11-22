@@ -683,7 +683,7 @@ protected:
     TextInput* m_amountInput = nullptr;
     TextInput* m_targetInput = nullptr;
     cocos2d::CCLabelBMFont* m_lockedTarget = nullptr;
-    CCMenuItemToggler* m_everyBtn = nullptr;
+    CCMenuItemSpriteExtra* m_everyBtn = nullptr;
     bool m_every = false;
     CCLabelBMFont* m_balanceLabel = nullptr;
     cocos2d::CCSprite* m_balanceIcon = nullptr;
@@ -782,34 +782,16 @@ protected:
             m_mainLayer->addChild(m_targetInput);
         }
 
-        // --- every-attempt checkbox + label, centred as a group ---
-        auto* offSpr = cocos2d::CCSprite::createWithSpriteFrameName("GJ_checkOff_001.png");
-        auto* onSpr = cocos2d::CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png");
+        // --- every-attempt checkbox + label, centred as one tappable group ---
         auto* everyMenu = CCMenu::create();
         everyMenu->setPosition({ 0.f, 0.f });
         m_mainLayer->addChild(everyMenu);
-        auto* everyLab = CCLabelBMFont::create("Re-bet every attempt", "bigFont.fnt");
-        everyLab->limitLabelWidth(190.f, .4f, .2f);
-        everyLab->setAnchorPoint({ 0.f, .5f });
-        if (offSpr && onSpr) {
-            m_everyBtn = CCMenuItemToggler::create(offSpr, onSpr, this,
-                menu_selector(SorAttemptBetPopup::onEvery));
-            m_everyBtn->setScale(.7f);
-            const float boxW = offSpr->getContentWidth() * .7f;
-            const float gap = 8.f;
-            const float groupW = boxW + gap + everyLab->getScaledContentWidth();
-            const float left = cx - groupW / 2.f;
-            m_everyBtn->setPosition({ left + boxW / 2.f, Y_EVERY });
-            everyMenu->addChild(m_everyBtn);
-            everyLab->setPosition({ left + boxW + gap, Y_EVERY });
-            m_mainLayer->addChild(everyLab);
-        } else {
-            everyLab->setAnchorPoint({ .5f, .5f });
-            m_everyBtn = CCMenuItemToggler::create(everyLab, everyLab, this,
-                menu_selector(SorAttemptBetPopup::onEvery));
-            m_everyBtn->setPosition({ cx, Y_EVERY });
-            everyMenu->addChild(m_everyBtn);
-        }
+        m_everyBtn = ui::checkbox(&m_every, "Re-bet every attempt", .7f, .42f, 200.f, [](bool on) {
+            Notification::create(on ? "Re-bet on - press Place bet to save it" : "Re-bet off - press Place bet to save it",
+                NotificationIcon::Info, 1.2f)->show();
+        });
+        m_everyBtn->setPosition({ cx, Y_EVERY });
+        everyMenu->addChild(m_everyBtn);
 
         // --- info pill: payout left, cap right ---
         auto* infoBg = panel(W - 2.f * PAD + 8.f, 26.f, 110);
@@ -900,13 +882,6 @@ protected:
         m_amountInput->setString(std::to_string(amount).c_str());
         this->updateInfo();
     }
-    // CCMenuItemToggler flips itself right after this callback, so read the
-    // NEW state as !isToggled() (toggling here as well cancelled the tap -
-    // the check mark never appeared).
-    void onEvery(CCObject* sender) {
-        auto t = static_cast<CCMenuItemToggler*>(sender);
-        m_every = !t->isToggled();
-    }
     void onPlace(CCObject*) {
         // One bet per attempt. The every-attempt checkbox still applies to
         // the NEXT attempts, so it can be switched on/off from here.
@@ -991,13 +966,12 @@ public:
         ret->m_levelId = levelId;
         ret->m_rules = rules;
         if (ret->init(betui::W, betui::H)) {
+            ret->m_every = recurringOn() && recurringBet().amount > 0; // box starts checked
             ret->setup(); // plain Popup: no automatic setup hook
-            if (recurringOn() && recurringBet().amount > 0) {
+            if (ret->m_every) {
                 ret->m_amountInput->setString(std::to_string(recurringBet().amount).c_str());
                 if (ret->m_targetInput)
                     ret->m_targetInput->setString(std::to_string(recurringBet().targetPct).c_str());
-                ret->m_everyBtn->toggle(true);
-                ret->m_every = true;
                 ret->updateInfo();
             }
             ret->autorelease();
@@ -1530,40 +1504,49 @@ inline cocos2d::CCSprite* makeGlimmerCircle(float scale) {
     return circle;
 }
 
-// The glimmer chip on a level page: same size, right of the favorite button.
-inline void attachLevelBetButton(LevelInfoLayer* layer, std::int64_t levelId) {
-    if (!layer || layer->getChildByID("sor-bet-menu")) return;
-
-    cocos2d::CCNode* fav = layer->getChildByID("favorite-button");
-    float x, y, ref;
-    if (fav) {
-        const auto p = fav->getPosition();
-        ref = fav->getScaledContentWidth();
-        x = p.x + ref + 10.f;
-        y = p.y;
-    } else {
-        const auto win = cocos2d::CCDirector::get()->getWinSize();
-        x = win.width - 110.f;
-        y = win.height - 50.f;
-        ref = 36.f;
+// Level-page buttons (Glimmer bet, VS) go into GD's left button column
+// (Geode node id "left-side-menu", a laid-out column), sized like the
+// buttons already there, so they never sit on top of other mods' buttons.
+// Falls back to a small menu under the title when that menu is missing.
+inline void placeLevelButton(LevelInfoLayer* layer, CCMenuItemSpriteExtra* btn, cocos2d::CCNode* spr) {
+    if (!layer || !btn) return;
+    if (auto* col = layer->getChildByID("left-side-menu"); col && col->getLayout()) {
+        float ref = 0.f;
+        for (auto* c : geode::cocos::CCArrayExt<cocos2d::CCNode*>(col->getChildren()))
+            ref = std::max(ref, c->getScaledContentHeight());
+        if (ref <= 0.f) ref = 40.f;
+        if (spr) spr->setScale(spr->getScale() * ref / std::max(1.f, spr->getScaledContentHeight()));
+        btn->setContentSize(spr ? spr->getScaledContentSize() : btn->getContentSize());
+        if (spr) spr->setPosition(btn->getContentSize() / 2.f);
+        col->addChild(btn);
+        col->updateLayout();
+        return;
     }
+    auto* menu = static_cast<CCMenu*>(layer->getChildByID("sor-level-buttons"));
+    if (!menu) {
+        menu = CCMenu::create();
+        menu->setID("sor-level-buttons");
+        const auto win = cocos2d::CCDirector::get()->getWinSize();
+        menu->setPosition({ 30.f, win.height / 2.f - 60.f });
+        menu->setLayout(geode::ColumnLayout::create()->setGap(6.f)->setAxisReverse(true));
+        menu->setContentSize({ 40.f, 120.f });
+        layer->addChild(menu, 60);
+    }
+    menu->addChild(btn);
+    menu->updateLayout();
+}
 
+inline void attachLevelBetButton(LevelInfoLayer* layer, std::int64_t levelId) {
+    if (!layer || layer->getChildByID("sor-bet-host")) return;
     auto host = SorBetButtonHost::create(levelId, betRulesForLevel(layer->m_level));
     host->setID("sor-bet-host");
     layer->addChild(host);
 
-    auto spr = makeGlimmerCircle(std::clamp(ref / 42.f, .6f, 1.1f));
+    auto spr = makeGlimmerCircle(1.f);
     if (!spr) return;
-    auto btn = CCMenuItemSpriteExtra::create(spr, host,
-        menu_selector(SorBetButtonHost::onBet));
-    btn->setPosition({ x, y });
-
-    auto menu = CCMenu::create();
-    menu->setPosition({ 0.f, 0.f });
-    menu->setID("sor-bet-menu");
-    menu->addChild(btn);
-    menu->setZOrder(60);
-    layer->addChild(menu);
+    auto btn = CCMenuItemSpriteExtra::create(spr, host, menu_selector(SorBetButtonHost::onBet));
+    btn->setID("sor-bet-button"_spr);
+    placeLevelButton(layer, btn, spr);
 }
 
 // Pause menu: the same chip plus a status line about the bet.

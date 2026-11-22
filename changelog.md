@@ -1,3 +1,8 @@
+## v2.25.3 - Checkboxes, level buttons, bigger Versus buttons
+- FIXED "Re-bet every attempt" for real: the checkbox no longer uses GD's toggle button at all - it's a plain button that swaps the check mark itself, so it always shows. Tapping the text toggles it too. The room popup's two checkboxes use the same fix.
+- The Glimmer bet and VS buttons on level pages moved into GD's left button column, sized like the buttons there, so they no longer sit on top of other mods' buttons.
+- Versus popups: Mode / Best of / Ranked / cup-size buttons are bigger with bigger text; the popup is wider so they fit.
+
 ## v2.25.2 - Re-bet every attempt fixed
 - FIXED the "Re-bet every attempt" checkbox: tapping it did nothing (it was flipped twice), so the check never showed and the preset never turned on. The same bug is fixed for the room popup's toggles.
 - FIXED every-attempt bets not surviving a game restart (the saved preset was never loaded).

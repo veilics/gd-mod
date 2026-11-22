@@ -227,8 +227,7 @@ protected:
     // create
     struct Stepper { CCLabelBMFont* value; int idx; };
     std::vector<Stepper> m_steps;
-    CCMenuItemToggler* m_progBtn = nullptr;
-    CCMenuItemToggler* m_demBtn = nullptr;
+    bool m_prog = true, m_dem = false;
     CCMenuItemSpriteExtra* m_createBtn = nullptr;
 
     // lobby
@@ -493,21 +492,12 @@ protected:
             this->refreshStep(i);
         }
         // toggles: real GD checkboxes + labels
-        auto mk = [&](float x, const char* text, CCMenuItemToggler*& out) {
-            auto* off = CCSprite::createWithSpriteFrameName("GJ_checkOff_001.png");
-            auto* on = CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png");
-            out = CCMenuItemToggler::create(off, on, this, menu_selector(SorrowRoomLayer::onToggle));
-            out->setScale(.6f);
-            out->setPosition({ x, 52.f });
-            m->addChild(out);
-            label(m_createRoot, text, "bigFont.fnt", .4f, { x + 16.f, 52.f }, { 0.f, .5f });
-        };
-        mk(70.f, "Progressive targets", m_progBtn);
-        mk(278.f, "Demons only", m_demBtn);
-        m_progBtn->setPositionY(46.f); m_demBtn->setPositionY(46.f);
-        for (auto* ch : geode::cocos::CCArrayExt<cocos2d::CCNode*>(m_createRoot->getChildren()))
-            if (auto* l = typeinfo_cast<CCLabelBMFont*>(ch); l && l->getPositionY() == 52.f) l->setPositionY(46.f);
-        m_progBtn->toggle(true);
+        m_prog = true;
+        auto* progBtn = sorrow::ui::checkbox(&m_prog, "Progressive targets", .6f, .4f, 150.f);
+        auto* demBtn = sorrow::ui::checkbox(&m_dem, "Demons only", .6f, .4f, 120.f);
+        m->addChild(progBtn);
+        m->addChild(demBtn);
+        sorrow::ui::row({ progBtn, demBtn }, CX, 46.f, 30.f);
         m_createBtn = CCMenuItemSpriteExtra::create(btn("Create room", "GJ_button_01.png", 120), this,
             menu_selector(SorrowRoomLayer::onCreate));
         m_createBtn->setPosition({ CX, 20.f });
@@ -532,7 +522,6 @@ protected:
     }
     void onStepDown(CCObject* s) { if (s->getTag() >= static_cast<int>(m_steps.size())) return; m_steps[s->getTag()].idx--; this->refreshStep(s->getTag()); if (s->getTag() == 0) this->refreshStep(1); }
     void onStepUp(CCObject* s) { if (s->getTag() >= static_cast<int>(m_steps.size())) return; m_steps[s->getTag()].idx++; this->refreshStep(s->getTag()); if (s->getTag() == 0) this->refreshStep(1); }
-    void onToggle(CCObject*) {} // CCMenuItemToggler flips itself; toggling here cancelled the tap
 
     void onCreate(CCObject*) {
         if (!sorrow::isLinked()) { this->setStatus("Not linked - run /gd link in Discord first"); return; }
@@ -547,8 +536,8 @@ protected:
         else o.rounds = roundsOpt()[m_steps[3].idx].num;
         o.startTarget = targets()[m_steps[4].idx].num;
         o.maxPlayers = maxes()[m_steps[5].idx].num;
-        o.progressive = m_progBtn->isToggled();
-        o.demons = m_demBtn->isToggled();
+        o.progressive = m_prog;
+        o.demons = m_dem;
         o.rarity = RouletteManager::get().sorRarity.empty() ? "any" : RouletteManager::get().sorRarity;
         this->setStatus("Creating...");
         m_createBtn->setEnabled(false);

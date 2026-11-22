@@ -2,6 +2,7 @@
 #pragma once
 
 #include <Geode/Geode.hpp>
+#include <Geode/binding/CCMenuItemSpriteExtra.hpp>
 
 namespace sorrow::ui {
 
@@ -37,6 +38,36 @@ inline void row(const std::vector<cocos2d::CCNode*>& nodes, float cx, float y, f
         n->setPosition({ x + w / 2.f, y });
         x += w + gap;
     }
+}
+
+// A checkbox that does not depend on CCMenuItemToggler (whose toggle-vs-
+// callback order made our boxes never show a check): a plain button whose
+// box frame we swap ourselves. Tapping the box OR its label toggles it.
+// `value` must outlive the button (a member of the popup that owns it).
+inline CCMenuItemSpriteExtra* checkbox(bool* value, const std::string& text, float boxScale, float textScale,
+                                       float maxTextW = 220.f, std::function<void(bool)> onChange = nullptr) {
+    auto* node = cocos2d::CCNode::create();
+    auto* box = cocos2d::CCSprite::createWithSpriteFrameName(*value ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png");
+    box->setScale(boxScale);
+    const float bw = box->getScaledContentWidth(), bh = box->getScaledContentHeight();
+    float w = bw;
+    if (!text.empty()) {
+        auto* lab = cocos2d::CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
+        lab->limitLabelWidth(maxTextW, textScale, .1f);
+        lab->setAnchorPoint({ 0.f, .5f });
+        lab->setPosition({ bw + 6.f, bh / 2.f });
+        node->addChild(lab);
+        w += 6.f + lab->getScaledContentWidth();
+    }
+    box->setPosition({ bw / 2.f, bh / 2.f });
+    node->addChild(box);
+    node->setContentSize({ w, bh });
+    return geode::cocos::CCMenuItemExt::createSpriteExtra(node, [value, box, onChange](CCMenuItemSpriteExtra*) {
+        *value = !*value;
+        if (auto* f = cocos2d::CCSpriteFrameCache::get()->spriteFrameByName(*value ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png"))
+            box->setDisplayFrame(f);
+        if (onChange) onChange(*value);
+    });
 }
 
 } // namespace sorrow::ui

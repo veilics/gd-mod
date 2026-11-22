@@ -8,7 +8,7 @@
 	},
 	"id": "endrosity.sorrow-integration",
 	"name": "Sorrow Integration",
-	"version": "v2.25.2",
+	"version": "v2.25.3",
 	"developer": "endrosity",
 	"description": "Glimmer betting, roulette (solo + multiplayer rooms), daily and weekly challenges, and Globed support - all connected to the Sorrow Discord bot.",
 	"tags": [

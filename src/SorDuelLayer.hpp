@@ -259,15 +259,15 @@ protected:
         sl->setPosition({ 20.f, 76.f });
         m_mainLayer->addChild(sl);
         auto* sbg = sorrow::ui::panel(120.f, 26.f, { 0, 0, 0 }, 90);
-        sbg->setPosition({ 175.f, 76.f });
+        sbg->setPosition({ 180.f, 76.f });
         m_mainLayer->addChild(sbg);
-        if (auto* gem = betfx::glimmerSprite(13.f)) { gem->setPosition({ 127.f, 76.f }); m_mainLayer->addChild(gem); }
+        if (auto* gem = betfx::glimmerSprite(13.f)) { gem->setPosition({ 132.f, 76.f }); m_mainLayer->addChild(gem); }
         m_stake = TextInput::create(100.f, "0", "bigFont.fnt");
         m_stake->setCommonFilter(CommonFilter::Uint);
         m_stake->setMaxCharCount(15);
         m_stake->setScale(.8f);
         m_stake->hideBG();
-        m_stake->setPosition({ 183.f, 76.f });
+        m_stake->setPosition({ 188.f, 76.f });
         m_mainLayer->addChild(m_stake);
         auto* menu = CCMenu::create();
         menu->setPosition({ 0.f, 0.f });
@@ -276,11 +276,11 @@ protected:
         std::vector<cocos2d::CCNode*> chips;
         for (auto& [name, v] : cs) {
             const auto val = v;
-            auto* c = button(name, "GJ_button_04.png", .42f, [this, val] { m_stake->setString(std::to_string(val).c_str()); });
+            auto* c = button(name, "GJ_button_04.png", .55f, [this, val] { m_stake->setString(std::to_string(val).c_str()); });
             menu->addChild(c);
             chips.push_back(c);
         }
-        sorrow::ui::row(chips, 305.f, 76.f, 5.f);
+        sorrow::ui::row(chips, 340.f, 76.f, 6.f);
         const char* send = m_kind == "race" ? "Open Race" : m_kind == "tour" ? "Open Tournament" : "Send Challenge";
         auto* go = button(send, "GJ_button_01.png", .72f, [this] { this->onSend(); });
         go->setPosition({ W / 2.f, 24.f });
@@ -297,9 +297,11 @@ protected:
         const float step = w / opts.size();
         for (size_t i = 0; i < opts.size(); ++i) {
             const auto val = opts[i].first;
-            auto* spr = ButtonSprite::create(opts[i].second.c_str(), 150, true, "bigFont.fnt",
-                val == cur ? "GJ_button_01.png" : "GJ_button_04.png", 30.f, .55f);
-            spr->setScale(std::min(.6f, (step - 6.f) / std::max(1.f, spr->getContentWidth())));
+            // sized for its slot at ~0.85 scale so buttons AND text stay readable
+            const int inner = std::max(30, static_cast<int>((step - 6.f) / .85f) - 12);
+            auto* spr = ButtonSprite::create(opts[i].second.c_str(), inner, true, "bigFont.fnt",
+                val == cur ? "GJ_button_01.png" : "GJ_button_04.png", 30.f, .7f);
+            spr->setScale(std::min(.9f, (step - 6.f) / std::max(1.f, spr->getContentWidth())));
             auto* b = CCMenuItemExt::createSpriteExtra(spr, [this, pick, val](CCMenuItemSpriteExtra*) { pick(val); this->rebuild(); });
             b->setPosition({ x0 + step * (i + .5f), y });
             menu->addChild(b);
@@ -312,26 +314,27 @@ protected:
         menu->setPosition({ 0.f, 0.f });
         m_body->addChild(menu);
         const float W = m_size.width;
-        const float x0 = 100.f, segW = W - x0 - 16.f;
+        const float x0 = 92.f, segW = W - x0 - 14.f;
 
         // mode
         auto* ml = rowLabel("Mode"); ml->setPosition({ 20.f, 240.f }); m_body->addChild(ml);
         this->segment(menu, x0, 240.f, segW, { { "race", "Race" }, { "showdown", "Showdown" }, { "consistency", "Consistency" }, { "sudden", "Sudden" } },
             m_o.mode, [this](std::string v) { m_o.mode = v; });
-        auto* md = label(modeDesc(m_o.mode), "bigFont.fnt", .26f, { 200, 200, 225 });
-        md->limitLabelWidth(segW, .26f, .12f);
+        auto* md = label(modeDesc(m_o.mode), "bigFont.fnt", .3f, { 200, 200, 225 });
+        md->limitLabelWidth(segW, .3f, .12f);
         md->setPosition({ x0 + segW / 2.f, 222.f });
         m_body->addChild(md);
 
         // rounds + ranked (duel) / size (tour)
         auto* bl = rowLabel("Best of"); bl->setPosition({ 20.f, 194.f }); m_body->addChild(bl);
-        this->segment(menu, x0, 194.f, 120.f, { { "1", "1" }, { "3", "3" }, { "5", "5" } }, std::to_string(m_o.bestOf),
+        const float boW = 150.f;
+        this->segment(menu, x0, 194.f, boW, { { "1", "1" }, { "3", "3" }, { "5", "5" } }, std::to_string(m_o.bestOf),
             [this](std::string v) { m_o.bestOf = std::stoi(v); });
         if (m_kind == "duel")
-            this->segment(menu, x0 + 132.f, 194.f, segW - 132.f, { { "1", "Ranked" }, { "0", "Casual" } }, m_o.ranked ? "1" : "0",
+            this->segment(menu, x0 + boW + 14.f, 194.f, segW - boW - 14.f, { { "1", "Ranked" }, { "0", "Casual" } }, m_o.ranked ? "1" : "0",
                 [this](std::string v) { m_o.ranked = v == "1"; });
         else if (m_kind == "tour")
-            this->segment(menu, x0 + 132.f, 194.f, segW - 132.f, { { "4", "4 players" }, { "8", "8 players" } }, std::to_string(m_cupSize),
+            this->segment(menu, x0 + boW + 14.f, 194.f, segW - boW - 14.f, { { "4", "4 Players" }, { "8", "8 Players" } }, std::to_string(m_cupSize),
                 [this](std::string v) { m_cupSize = std::stoi(v); });
 
         // target % (race) or time limit
@@ -442,7 +445,7 @@ public:
         r->m_o.ranked = kind == "duel";
         r->m_level = level;
         r->m_done = std::move(done);
-        if (r->init(400.f, 290.f)) { r->setup(); r->autorelease(); return r; }
+        if (r->init(450.f, 290.f)) { r->setup(); r->autorelease(); return r; }
         delete r;
         return nullptr;
     }
