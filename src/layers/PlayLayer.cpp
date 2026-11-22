@@ -61,6 +61,10 @@ class $modify(RLPlayLayer, PlayLayer)
 
 	void resetLevel()
 	{
+		// Sorrow: every-attempt re-bet also on manual restarts / after a win
+		// (no-op when this attempt already carries a bet).
+		if (this->m_level && !this->m_isPracticeMode)
+			sorrow::applyRecurringIfDue(static_cast<std::int64_t>(this->m_level->m_levelID.value()), this->m_level);
 		if (RouletteManager::get().isPlaying && !Mod::get()->getSettingValue<bool>("hide-goal-reached"))
 		{
 			containerNodeCleanup();

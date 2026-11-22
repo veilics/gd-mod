@@ -1,3 +1,10 @@
+## v2.25.2 - Re-bet every attempt fixed
+- FIXED the "Re-bet every attempt" checkbox: tapping it did nothing (it was flipped twice), so the check never showed and the preset never turned on. The same bug is fixed for the room popup's toggles.
+- FIXED every-attempt bets not surviving a game restart (the saved preset was never loaded).
+- Re-bet now also re-arms on manual restarts and after a completion, not only after deaths.
+- You can switch re-bet on while a bet is already live; it starts from the next attempt.
+- NEW indicator under the bet badge: "Re-bet: 10k Glimmer @ 60%" whenever every-attempt is on.
+
 ## v2.25.1 - Versus UI fixes
 - Fixed the segmented buttons (Mode, Best of, Ranked/Casual, cup size) overlapping each other.
 - Fixed text running outside the Challenge a Player box and other long labels in the duel popups.

@@ -532,7 +532,7 @@ protected:
     }
     void onStepDown(CCObject* s) { if (s->getTag() >= static_cast<int>(m_steps.size())) return; m_steps[s->getTag()].idx--; this->refreshStep(s->getTag()); if (s->getTag() == 0) this->refreshStep(1); }
     void onStepUp(CCObject* s) { if (s->getTag() >= static_cast<int>(m_steps.size())) return; m_steps[s->getTag()].idx++; this->refreshStep(s->getTag()); if (s->getTag() == 0) this->refreshStep(1); }
-    void onToggle(CCObject* sender) { auto* t = static_cast<CCMenuItemToggler*>(sender); t->toggle(!t->isToggled()); }
+    void onToggle(CCObject*) {} // CCMenuItemToggler flips itself; toggling here cancelled the tap
 
     void onCreate(CCObject*) {
         if (!sorrow::isLinked()) { this->setStatus("Not linked - run /gd link in Discord first"); return; }

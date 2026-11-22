@@ -614,6 +614,8 @@ inline void placeAttemptBet(std::int64_t levelId, std::int64_t amount, int targe
 // cap/target-lock table as the popup (this was the bug: re-arms went out
 // with bucket="" and no clamping, so difficulty limits never applied).
 inline void applyRecurringIfDue(std::int64_t levelId, GJGameLevel* level = nullptr) {
+    static bool loaded = false;
+    if (!loaded) { loaded = true; loadBetPrefs(); }
     if (!recurringOn() || recurringBet().amount <= 0) return;
     if (activeBet().amount > 0 && activeBetLevel() == levelId) return; // already placed
     if (betInFlight()) return;
@@ -682,6 +684,7 @@ protected:
     TextInput* m_targetInput = nullptr;
     cocos2d::CCLabelBMFont* m_lockedTarget = nullptr;
     CCMenuItemToggler* m_everyBtn = nullptr;
+    bool m_every = false;
     CCLabelBMFont* m_balanceLabel = nullptr;
     cocos2d::CCSprite* m_balanceIcon = nullptr;
     CCLabelBMFont* m_payoutLabel = nullptr;
@@ -897,19 +900,37 @@ protected:
         m_amountInput->setString(std::to_string(amount).c_str());
         this->updateInfo();
     }
+    // CCMenuItemToggler flips itself right after this callback, so read the
+    // NEW state as !isToggled() (toggling here as well cancelled the tap -
+    // the check mark never appeared).
     void onEvery(CCObject* sender) {
         auto t = static_cast<CCMenuItemToggler*>(sender);
-        t->toggle(!t->isToggled());
+        m_every = !t->isToggled();
     }
     void onPlace(CCObject*) {
         // One bet per attempt. The every-attempt checkbox still applies to
         // the NEXT attempts, so it can be switched on/off from here.
-        const bool every = m_everyBtn && m_everyBtn->isToggled();
+        const bool every = m_every;
         if (betInFlight() || (activeBet().amount > 0 && activeBetLevel() == m_levelId)) {
             std::string msg = "You already have a bet on this attempt";
-            if (!every && recurringOn()) {
+            if (every) {
+                // turn on / update re-bet from the NEXT attempt
+                auto amount = std::min(this->parsedAmount(), m_rules.cap);
+                int pct = this->targetPct();
+                if (m_rules.targetLocked) pct = 100; else pct = std::max(pct, m_rules.minTarget);
+                if (amount > 0) {
+                    recurringOn() = true;
+                    recurringBet() = { amount, pct };
+                    saveBetPrefs();
+                    msg = fmt::format("Re-bet on: {} @ {}% from the next attempt", formatGlimmer(amount), pct);
+                }
+                Notification::create(msg.c_str(), NotificationIcon::Success, 1.6f)->show();
+                this->onClose(nullptr);
+                return;
+            }
+            if (recurringOn()) {
                 stopRecurring();
-                msg = "Already bet on this attempt - auto re-bet turned off";
+                msg = "Already bet on this attempt - re-bet turned off";
             }
             Notification::create(msg.c_str(), NotificationIcon::Warning, 1.4f)->show();
             return;
@@ -976,6 +997,7 @@ public:
                 if (ret->m_targetInput)
                     ret->m_targetInput->setString(std::to_string(recurringBet().targetPct).c_str());
                 ret->m_everyBtn->toggle(true);
+                ret->m_every = true;
                 ret->updateInfo();
             }
             ret->autorelease();
@@ -1023,6 +1045,15 @@ public:
         m_label->setAnchorPoint({ 0.f, .5f });
         this->addChild(m_label);
 
+        // "Re-bet: 10k Glimmer @ 60%" under the badge while every-attempt is on
+        m_rebetBg = ui::panel(80.f, 15.f, { 0, 0, 0 }, 90);
+        m_rebetBg->setAnchorPoint({ 0.f, 1.f });
+        this->addChild(m_rebetBg);
+        m_rebet = CCLabelBMFont::create("", "bigFont.fnt");
+        m_rebet->setAnchorPoint({ 0.f, .5f });
+        m_rebet->setColor({ 140, 220, 255 });
+        this->addChild(m_rebet);
+
         this->refresh(true);
         this->schedule(schedule_selector(SorBetBadge::poll), 0.15f);
         return true;
@@ -1040,12 +1071,14 @@ public:
         if (activeBet().amount > 0 && activeBetLevel() == m_levelId) {
             state = 2;
             text = fmt::format("BET {} @ {}%", formatGlimmer(activeBet().amount), activeBet().targetPct);
-            if (recurringOn()) text += "  AUTO";
         } else if (betInFlight()) {
             state = 1;
             text = "Placing bet...";
         }
-        if (!force && state == m_state && text == m_text) return;
+        const std::string rebet = recurringOn() && recurringBet().amount > 0
+            ? fmt::format("Re-bet: {} Glimmer @ {}%", formatGlimmer(recurringBet().amount), recurringBet().targetPct) : std::string();
+        if (!force && state == m_state && text == m_text && rebet == m_rebetText) return;
+        m_rebetText = rebet;
         const bool flipped = state != m_state;
         m_state = state;
         m_text = text;
@@ -1071,6 +1104,17 @@ public:
         m_label->setPosition({ padX + iconW + gap, h / 2.f + 0.5f });
         m_label->setOpacity(state == 0 ? 170 : 255);
 
+        m_rebet->setVisible(!rebet.empty());
+        m_rebetBg->setVisible(!rebet.empty());
+        if (!rebet.empty()) {
+            m_rebet->setString(rebet.c_str());
+            m_rebet->limitLabelWidth(150.f, .26f, .1f);
+            const float rw = m_rebet->getScaledContentWidth() + 2.f * padX;
+            ui::resize(m_rebetBg, rw, 15.f);
+            m_rebetBg->setPosition({ 0.f, -2.f });
+            m_rebet->setPosition({ padX, -2.f - 7.5f });
+        }
+
         if (flipped && !force) {
             this->stopActionByTag(21);
             auto* pop = cocos2d::CCSequence::create(
@@ -1086,8 +1130,10 @@ private:
     cocos2d::extension::CCScale9Sprite* m_bg = nullptr;
     cocos2d::CCSprite* m_icon = nullptr;
     CCLabelBMFont* m_label = nullptr;
+    cocos2d::extension::CCScale9Sprite* m_rebetBg = nullptr;
+    CCLabelBMFont* m_rebet = nullptr;
     int m_state = -1;
-    std::string m_text;
+    std::string m_text, m_rebetText;
 };
 
 inline void attachBetBadge(PlayLayer* layer, std::int64_t levelId) {
