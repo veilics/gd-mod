@@ -53,6 +53,7 @@ class $modify(RLPlayLayer, PlayLayer)
 		sorrow::rooms::listenRoomEvents(); // no-op once registered (Globed may load after us)
 		sorrow::rooms::attachGlobedFilter(this);  // only your roulette room / duel is visible
 		sorrow::duels::attachHud(this, static_cast<int>(level->m_levelID.value()));
+		sorrow::fair::attachOverlay(this, static_cast<int>(level->m_levelID.value()));
 		sorrow::duels::listenGlobed();
 		if (!sorrow::chal::state().loaded) sorrow::chal::fetch(); // so challenge runs can be claimed
 
@@ -86,6 +87,7 @@ class $modify(RLPlayLayer, PlayLayer)
 	void onQuit()
 	{
 		const auto lvl = static_cast<std::int64_t>(this->m_level->m_levelID.value());
+		sorrow::fair::userQuit(static_cast<int>(lvl)); // left a round level yourself: no auto re-entry this round
 		if (!this->m_isPracticeMode && sorrow::activeBet().amount > 0 && sorrow::activeBetLevel() == lvl)
 		{
 			// Dead = that attempt was already settled at death; a bet live now
@@ -481,5 +483,18 @@ class $modify(RLPlayLayer, PlayLayer)
 					nullptr
 				)
 			);
+	}
+};
+
+
+// Sorrow fair start: hold the round level at its first frame (no physics,
+// music paused) until every player is in and the countdown hits GO.
+#include <Geode/modify/GJBaseGameLayer.hpp>
+class $modify(SorFairHold, GJBaseGameLayer) {
+	void update(float dt)
+	{
+		auto* pl = PlayLayer::get();
+		if (pl && static_cast<GJBaseGameLayer*>(pl) == static_cast<GJBaseGameLayer*>(this) && sorrow::fair::holdFrame(pl)) return;
+		GJBaseGameLayer::update(dt);
 	}
 };

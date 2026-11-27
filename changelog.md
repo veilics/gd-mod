@@ -1,3 +1,12 @@
+## v2.26.0 - Fair starts, rank trophies, Versus overhaul
+- FIXED big numbers showing one tier too high: 1,000,000 Glimmer showed as "1B" (and every balance over 1M was off by a tier). Only the display was wrong; amounts were always correct.
+- FAIR STARTS (roulette rooms + Versus): each round your game downloads the level AND its song, opens it and holds at the first frame (no physics, music paused). The countdown only starts once everyone is in - or after 60 s, without whoever is missing. If a song can't be downloaded within 25 s it is skipped. At GO the attempt restarts from 0 with the music. An overlay shows who is still loading, then 3-2-1-GO. Leaving the level yourself stops the auto re-entry for that round.
+- RARITY FILTER for duels, races and tournaments: Any, Featured, Epic, Legendary, Mythic.
+- NEW rank trophies: the mod's own trophy art in each tier's metal - bronze, silver, gold, platinum, diamond (gem) and champion (crown) - with a matching glow and sparkles.
+- VERSUS OVERHAUL: drifting-square background and a glowing title; profile card with the big trophy, a progress bar to your next rank, win rate, peak and earnings; match view with rank-coloured fighter cards that slide in, a VS flash, trophies by each name, head-to-head record, and live "in the level / loading" status; trophies on the leaderboard; rarity shown on every list.
+- NEW Quick Chat in duels: Good luck, GG, Nice, So close, WOW, Oops, EZ, Rematch? - shown to your opponent as a popup.
+- BOT (upload gd.js + restart).
+
 ## v2.25.4 - Bet + room fixes
 - Re-bet is tied to the level you turned it on in: the "Re-bet:" line and the auto bets no longer follow you into other levels, and unticking the box turns it off immediately.
 - FIXED a second win when you died at your bet % and then paused/left: the re-bet was placed while you were still dead at the winning %, and quitting settled it. Re-bets now start when the next attempt actually starts, and a bet left over from a dead attempt counts as 0%.

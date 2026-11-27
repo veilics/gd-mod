@@ -19,6 +19,8 @@
 
 #include <Geode/binding/LevelInfoLayer.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
+#include <Geode/binding/MusicDownloadManager.hpp>
+#include <Geode/binding/FMODAudioEngine.hpp>
 #include <chrono>
 
 namespace sorrow::duels {
@@ -40,11 +42,11 @@ inline std::string str(const matjson::Value& v) { return v.asString().unwrapOr("
 struct Player {
     std::string uid, name, rank;
     int acc = 0, iconId = 1, c1 = 0, c2 = 3, glow = 0, wins = 0, pct = 0, elo = 1000, best = 0, attempts = 0, timeMs = 0;
-    bool ready = false, done = false, forfeited = false;
+    bool ready = false, done = false, forfeited = false, loaded = false;
     std::int64_t side = 0;
 };
 struct RoundRow { int n = 0; std::string levelName, winner, winnerName, reason; int winnerPct = 0, timeMs = 0; };
-struct Event { int seq = 0; std::string kind, text; };
+struct Event { int seq = 0; std::string kind, text, from, emote; };
 struct Result {
     bool has = false;
     std::string winnerId, winnerName, reason;
@@ -68,13 +70,15 @@ struct Duel {
     std::vector<RoundRow> rounds;
     std::vector<Event> events;
     Result result;
+    bool hasH2h = false;
+    int h2hW = 0, h2hL = 0, h2hD = 0;
 
     bool isMine() const { for (auto& p : players) if (p.uid == me) return true; return false; }
     const Player* find(const std::string& uid) const { for (auto& p : players) if (p.uid == uid) return &p; return nullptr; }
     const Player* opponent() const { for (auto& p : players) if (p.uid != me) return &p; return nullptr; }
-    bool live() const { return state == "lobby" || state == "intermission" || state == "countdown" || state == "playing"; }
-    bool racing() const { return state == "countdown" || state == "playing"; }
-    bool bettingOpen() const { return (state == "invite" || state == "lobby" || state == "intermission" || state == "countdown") && round == 0; }
+    bool live() const { return state == "lobby" || state == "intermission" || state == "loading" || state == "countdown" || state == "playing"; }
+    bool racing() const { return state == "loading" || state == "countdown" || state == "playing"; }
+    bool bettingOpen() const { return (state == "invite" || state == "lobby" || state == "intermission" || state == "loading" || state == "countdown") && round == 0; }
     std::string summary() const {
         std::string s = modeName.empty() ? mode : modeName;
         if (mode == "race") s += fmt::format(" to {}%", target);
@@ -89,7 +93,7 @@ inline std::string fmtTime(int ms) {
 struct Match { std::string a, aName, b, bName, winner, duelId, state, score; };
 struct Tour {
     bool valid = false, mine = false;
-    std::string id, name, state, hostId, hostName, mode, modeName, difficulty, roundName, winnerId, winnerName;
+    std::string id, name, state, hostId, hostName, mode, modeName, difficulty, rarity, roundName, winnerId, winnerName;
     int size = 8, bestOf = 1, target = 50, round = 0;
     std::int64_t entry = 0, pot = 0, myPrize = 0;
     int myPlace = 0;
@@ -157,6 +161,7 @@ inline Duel parseDuel(const matjson::Value& v) {
             pl.done = p["done"].asBool().unwrapOr(false); pl.forfeited = p["forfeited"].asBool().unwrapOr(false);
             pl.side = toI64(p["side"]);
             pl.best = toInt(p["best"]); pl.attempts = toInt(p["attempts"]); pl.timeMs = toInt(p["time"]);
+            pl.loaded = p["loaded"].asBool().unwrapOr(false);
             d.players.push_back(std::move(pl));
         }
     if (auto arr = v["rounds"].asArray())
@@ -169,7 +174,8 @@ inline Duel parseDuel(const matjson::Value& v) {
             d.rounds.push_back(std::move(row));
         }
     if (auto arr = v["events"].asArray())
-        for (const auto& e : *arr) d.events.push_back({ toInt(e["seq"]), str(e["kind"]), str(e["text"]) });
+        for (const auto& e : *arr) d.events.push_back({ toInt(e["seq"]), str(e["kind"]), str(e["text"]), str(e["from"]), str(e["emote"]) });
+    if (v["h2h"].isObject()) { d.hasH2h = true; d.h2hW = toInt(v["h2h"]["w"]); d.h2hL = toInt(v["h2h"]["l"]); d.h2hD = toInt(v["h2h"]["d"]); }
     if (v["result"].isObject()) {
         const auto& r = v["result"];
         auto& o = d.result;
@@ -191,7 +197,7 @@ inline Tour parseTour(const matjson::Value& v) {
     if (!v.isObject()) return t;
     t.valid = true;
     t.id = str(v["id"]); t.name = str(v["name"]); t.state = str(v["state"]); t.hostId = str(v["hostId"]); t.hostName = str(v["hostName"]);
-    t.mode = str(v["mode"]); t.modeName = str(v["modeName"]); t.difficulty = str(v["difficulty"]); t.roundName = str(v["roundName"]);
+    t.mode = str(v["mode"]); t.modeName = str(v["modeName"]); t.difficulty = str(v["difficulty"]); t.rarity = str(v["rarity"]); t.roundName = str(v["roundName"]);
     t.winnerId = str(v["winnerId"]); t.winnerName = str(v["winnerName"]); t.mine = v["mine"].asBool().unwrapOr(false);
     t.size = toInt(v["size"], 8); t.bestOf = toInt(v["bestOf"], 1); t.target = toInt(v["target"], 50); t.round = toInt(v["round"]);
     t.entry = toI64(v["entry"]); t.pot = toI64(v["pot"]);
@@ -419,6 +425,15 @@ inline void queue(bool ranked, std::int64_t stake, DuelCb cb) {
         if (cb) cb(true, "");
     });
 }
+inline void emote(const std::string& id, const std::string& key) {
+    auto b = idBody(); b.set("id", id); b.set("emote", key);
+    Bridge::post("duels/emote", b, [](bool ok, int, matjson::Value body) {
+        if (!ok) { Notification::create(errOf(body, "Could not send").c_str(), NotificationIcon::Warning, 1.f)->show(); return; }
+        const auto d = parseDuel(body["duel"]);
+        if (d.valid && d.isMine()) state().duel = d;
+        changed();
+    });
+}
 inline void unqueue() {
     state().queue = {};
     Bridge::post("duels/unqueue", idBody(), [](bool, int, matjson::Value) { poll(); });
@@ -429,10 +444,10 @@ inline void ackSeason() {
     state().me.reward = {};
     Bridge::post("duels/ack", b, nullptr);
 }
-struct TourOptions { std::string mode = "race", difficulty = "any", title; int size = 8, bestOf = 1, target = 50, seconds = 240; std::int64_t entry = 0; };
+struct TourOptions { std::string mode = "race", difficulty = "any", rarity = "any", title; int size = 8, bestOf = 1, target = 50, seconds = 240; std::int64_t entry = 0; };
 inline void tourCreate(const TourOptions& o, DuelCb cb) {
     auto b = idBody();
-    b.set("mode", o.mode); b.set("difficulty", o.difficulty); b.set("size", o.size); b.set("bestOf", o.bestOf);
+    b.set("mode", o.mode); b.set("difficulty", o.difficulty); b.set("rarity", o.rarity); b.set("size", o.size); b.set("bestOf", o.bestOf);
     b.set("target", o.target); b.set("seconds", o.seconds); b.set("entry", static_cast<double>(o.entry)); b.set("title", o.title);
     Bridge::post("tours/create", b, [cb](bool ok, int, matjson::Value body) {
         if (cb) cb(ok, ok ? "" : errOf(body, "The bot did not answer"));
@@ -537,6 +552,8 @@ inline std::vector<int> visibleAccounts() {
     return out;
 }
 
+inline void fairTick(float dt); // defined below (fair start)
+
 // --------------------------------------------------------------- director --
 class DuelDirector : public cocos2d::CCObject {
 public:
@@ -556,7 +573,7 @@ public:
         // travel / auto-play
         if (m_travelIn > 0.f) { m_travelIn -= dt; if (m_travelIn <= 0.f) { m_travelIn = 0.f; this->goToLevel(); } }
         if (m_returnIn > 0.f) { m_returnIn -= dt; if (m_returnIn <= 0.f) { m_returnIn = 0.f; this->returnToScreen(); } }
-        this->autoPlay(dt);
+        fairTick(dt);
 
         const auto& d = state().duel;
         const bool inDuel = d.valid && d.isMine() && (d.live() || d.state == "invite");
@@ -619,6 +636,10 @@ private:
         for (auto& e : b.events) {
             if (e.seq <= m_seenEvent || !sameDuel) { maxSeq = std::max(maxSeq, e.seq); continue; }
             maxSeq = std::max(maxSeq, e.seq);
+            if (e.kind == "emote" && e.from != state().me.uid) {
+                Notification::create(e.text.c_str(), NotificationIcon::None, 2.f)->show();
+                continue;
+            }
             if (screenOpen()) continue;
             if (e.kind == "accept" || e.kind == "join" || e.kind == "leave" || e.kind == "forfeit" || e.kind == "closed")
                 Notification::create(e.text.c_str(), NotificationIcon::Info, 2.5f)->show();
@@ -639,7 +660,6 @@ private:
         if (b.racing() && b.levelId > 0 && (b.round != m_seenRound || b.id != m_seenId)) {
             m_seenRound = b.round;
             m_seenId = b.id;
-            m_playPressed = false;
             m_travelIn = 0.05f;
         }
         // finished
@@ -717,21 +737,6 @@ private:
         return scene ? scene->getChildByType<LevelInfoLayer>(0) : nullptr;
     }
 
-    // At GO, press Play on the round level's page (retries while it downloads).
-    void autoPlay(float dt) {
-        const auto& d = state().duel;
-        if (!d.valid || !d.isMine() || !d.racing() || d.levelId <= 0 || m_playPressed) return;
-        if (nowSec() < d.startAt - 0.05) return;
-        if (PlayLayer::get()) { m_playPressed = true; return; }
-        m_playWait -= dt;
-        if (m_playWait > 0.f) return;
-        m_playWait = 0.5f;
-        auto* lil = this->levelInfo();
-        if (!lil || !lil->m_level || static_cast<int>(lil->m_level->m_levelID.value()) != d.levelId) return;
-        if (cocos2d::CCDirector::get()->getRunningScene()->getChildByType<FLAlertLayer>(0)) return;
-        lil->onPlay(nullptr);
-    }
-
     void returnToScreen() {
         if (auto* pl = PlayLayer::get()) {
             if (!m_quitRequested) { m_quitRequested = true; pl->onQuit(); }
@@ -743,8 +748,8 @@ private:
         if (openScreenHook()) openScreenHook()();
     }
 
-    float m_wait = 0.f, m_travelIn = 0.f, m_returnIn = 0.f, m_playWait = 0.f;
-    bool m_busy = false, m_quitRequested = false, m_opening = false, m_playPressed = false, m_rewardShown = false;
+    float m_wait = 0.f, m_travelIn = 0.f, m_returnIn = 0.f;
+    bool m_busy = false, m_quitRequested = false, m_opening = false, m_rewardShown = false;
     int m_seenEvent = 0, m_seenRound = -1;
     std::string m_seenId, m_presented;
     std::set<std::string> m_announced;
@@ -873,14 +878,11 @@ private:
         if (!m_clock) return;
         const double t = nowSec();
         std::string clock, big;
-        if (d.state == "countdown" && d.startAt > t) {
-            const int s = static_cast<int>(std::ceil(d.startAt - t));
-            clock = "GET READY";
-            big = std::to_string(s);
-        } else if (d.state == "playing" && d.endsAt > t) {
+        if (d.state == "loading") clock = "LOADING...";
+        else if (d.state == "countdown" && d.startAt > t) clock = "GET READY";
+        else if (d.state == "playing" && d.endsAt > t) {
             const int s = static_cast<int>(d.endsAt - t);
             clock = fmt::format("{}:{:02}", s / 60, s % 60);
-            if (t - d.startAt < 0.9) big = "GO!";
         } else if (d.state == "intermission") clock = "NEXT ROUND...";
         else if (d.state == "finished") clock = "FINISHED";
         m_clock->setString(clock.c_str());
@@ -923,3 +925,245 @@ inline void attachHud(PlayLayer* pl, int levelId) {
 }
 
 } // namespace sorrow::duels
+
+
+// ===================================================================== fair start
+// Rooms and duels both "load" each round level before the race starts:
+//   1. your game opens the level page; once the LEVEL is downloaded and its
+//      SONG is downloaded (or turned out to be unavailable - then it is
+//      skipped after 25 s) Play is pressed for you;
+//   2. inside the level the game HOLDS at the start (no physics, music
+//      paused) and tells the bot rooms/loaded | duels/loaded;
+//   3. when everyone is in (or after 60 s) the bot counts down 4 s; at GO the
+//      attempt restarts from 0 with the music and the race is on.
+// A SorGateOverlay shows who is still loading, then 3 - 2 - 1 - GO.
+namespace sorrow::fair {
+
+struct Gate {
+    bool active = false, duel = false;
+    std::string id, phase;      // phase: loading | countdown | live
+    int round = 0, levelId = 0, loaded = 0, total = 0;
+    double goAt = 0;
+    std::vector<std::pair<std::string, bool>> who; // name, loaded
+};
+
+inline Gate current() {
+    Gate g;
+    const auto& d = duels::state().duel;
+    if (d.valid && d.isMine() && d.levelId > 0 && d.racing()) {
+        g.active = true; g.duel = true; g.id = d.id; g.round = d.round; g.levelId = d.levelId;
+        g.phase = d.state == "loading" ? "loading" : d.state == "countdown" ? "countdown" : "live";
+        g.goAt = d.startAt;
+        for (auto& p : d.players) if (!p.forfeited) { g.total++; g.loaded += p.loaded; g.who.push_back({ p.name, p.loaded }); }
+        return g;
+    }
+    const auto& r = rooms::state();
+    if (r.active && r.state == "playing" && r.levelId > 0 && !r.gate.phase.empty()) {
+        g.active = true; g.id = r.code; g.round = r.gate.round; g.levelId = r.levelId;
+        g.phase = r.gate.phase; g.goAt = r.gate.goAt; g.loaded = r.gate.loaded; g.total = r.gate.total;
+        for (size_t i = 0; i < r.playerIds.size(); ++i) {
+            if (i < r.playerEliminated.size() && r.playerEliminated[i]) continue;
+            g.who.push_back({ r.playerNames[i], i < r.playerLoaded.size() && r.playerLoaded[i] });
+        }
+    }
+    return g;
+}
+
+inline bool shouldHold(const Gate& g, int levelId) {
+    if (!g.active || g.levelId != levelId) return false;
+    if (g.phase == "loading") return true;
+    return g.phase == "countdown" && duels::nowSec() < g.goAt;
+}
+
+// ---- song: download it before playing; skip if it never arrives
+struct SongPrep { int id = 0; double started = 0; bool requested = false; };
+inline SongPrep& songPrep() { static SongPrep s; return s; }
+inline bool songReady(GJGameLevel* lvl, std::string* why = nullptr) {
+    if (!lvl) return true;
+    const int id = lvl->m_songID;
+    if (id <= 0) return true;                               // official song: bundled
+    auto* mdm = MusicDownloadManager::sharedState();
+    if (mdm->isSongDownloaded(id)) return true;
+    auto& sp = songPrep();
+    if (sp.id != id) sp = { id, duels::nowSec(), false };
+    if (!sp.requested) {
+        sp.requested = true;
+        if (mdm->getSongInfoObject(id)) mdm->downloadSong(id);
+        else mdm->getSongInfo(id, true);                    // fetch info, then download
+    }
+    if (duels::nowSec() - sp.started > 25.0) return true;   // unavailable / too slow: skip it
+    if (why) *why = "Downloading the song...";
+    return false;
+}
+inline std::string& status() { static std::string s; return s; }
+
+// ---- don't drag someone back in after they left the level themselves
+inline std::string& suppressKey() { static std::string s; return s; }
+inline std::string keyOf(const Gate& g) { return fmt::format("{}|{}|{}", g.id, g.round, g.levelId); }
+inline void userQuit(int levelId) {
+    auto g = current();
+    if (g.active && g.levelId == levelId) suppressKey() = keyOf(g);
+}
+
+// Called every 0.25 s by the duel director: press Play when level + song are ready.
+inline void tick(float) {
+    status().clear();
+    auto g = current();
+    if (!g.active || PlayLayer::get()) return;
+    if (suppressKey() == keyOf(g)) return;
+    auto* scene = cocos2d::CCDirector::get()->getRunningScene();
+    auto* lil = scene ? scene->getChildByType<LevelInfoLayer>(0) : nullptr;
+    if (!lil || !lil->m_level || static_cast<int>(lil->m_level->m_levelID.value()) != g.levelId) return;
+    if (scene->getChildByType<FLAlertLayer>(0)) return;
+    if (std::string(lil->m_level->m_levelString).empty()) { status() = "Downloading the level..."; return; }
+    if (!songReady(lil->m_level, &status())) return;
+    static double nextTry = 0;
+    if (duels::nowSec() < nextTry) return;
+    nextTry = duels::nowSec() + 1.0;
+    lil->onPlay(nullptr);
+}
+
+// ---- hold inside the level until GO
+struct Hold { std::string key; bool held = false, reported = false, released = false; double releasedAt = 0; };
+inline Hold& hold() { static Hold h; return h; }
+
+inline void reportLoaded(const Gate& g) {
+    auto b = rooms::idBody();
+    b.set("levelId", std::to_string(g.levelId));
+    if (g.duel) {
+        b.set("id", g.id);
+        Bridge::post("duels/loaded", b, [](bool ok, int, matjson::Value body) {
+            if (!ok) return;
+            const auto d = duels::parseDuel(body["duel"]);
+            if (d.valid && d.isMine()) duels::state().duel = d;
+            duels::changed();
+        });
+    } else {
+        b.set("code", g.id);
+        Bridge::post("rooms/loaded", b, [](bool ok, int, matjson::Value body) {
+            if (ok && body["room"].isObject()) rooms::applyRoomJson(body["room"], rooms::state());
+            rooms::pokeDirector();
+        });
+    }
+    duels::DuelDirector::get()->pokeNow();
+}
+
+// From GJBaseGameLayer::update: true = skip this frame (holding).
+inline bool holdFrame(PlayLayer* pl) {
+    if (!pl || !pl->m_level) return false;
+    const int lid = static_cast<int>(pl->m_level->m_levelID.value());
+    auto g = current();
+    if (!g.active || g.levelId != lid) return false;
+    auto& h = hold();
+    const auto key = keyOf(g);
+    if (h.key != key) h = { key };
+    if (shouldHold(g, lid)) {
+        h.held = true;
+        FMODAudioEngine::get()->pauseAllMusic(true);
+        if (!h.reported && g.phase == "loading") { h.reported = true; reportLoaded(g); }
+        return true;
+    }
+    if (h.held && !h.released) {
+        h.released = true;
+        h.releasedAt = duels::nowSec();
+        pl->resetLevel();                          // the attempt starts at GO, from 0
+        FMODAudioEngine::get()->resumeAllMusic();
+        return true;
+    }
+    return false;
+}
+
+// Overlay in the level: who is still loading, then 3 - 2 - 1 - GO.
+class SorGateOverlay : public cocos2d::CCNode {
+public:
+    static SorGateOverlay* create(int levelId) {
+        auto* n = new SorGateOverlay();
+        n->m_levelId = levelId;
+        n->autorelease();
+        n->setID("sor-gate-overlay"_spr);
+        n->schedule(schedule_selector(SorGateOverlay::tick), 0.1f);
+        n->build();
+        return n;
+    }
+private:
+    void build() {
+        const auto win = cocos2d::CCDirector::get()->getWinSize();
+        m_dim = cocos2d::CCLayerColor::create({ 0, 0, 0, 110 });
+        this->addChild(m_dim);
+        m_panel = sorrow::ui::panel(260.f, 74.f, { 0, 0, 0 }, 170);
+        m_panel->setPosition({ win.width / 2.f, win.height / 2.f + 40.f });
+        this->addChild(m_panel);
+        m_title = CCLabelBMFont::create("WAITING FOR PLAYERS", "goldFont.fnt");
+        m_title->setScale(.6f);
+        m_title->setPosition({ win.width / 2.f, win.height / 2.f + 62.f });
+        this->addChild(m_title);
+        m_count = CCLabelBMFont::create("", "bigFont.fnt");
+        m_count->setScale(.4f);
+        m_count->setPosition({ win.width / 2.f, win.height / 2.f + 44.f });
+        this->addChild(m_count);
+        m_names = CCLabelBMFont::create("", "bigFont.fnt");
+        m_names->setPosition({ win.width / 2.f, win.height / 2.f + 24.f });
+        this->addChild(m_names);
+        m_big = CCLabelBMFont::create("", "goldFont.fnt");
+        m_big->setPosition({ win.width / 2.f, win.height / 2.f + 30.f });
+        this->addChild(m_big, 5);
+    }
+    void tick(float) {
+        auto g = current();
+        const double t = duels::nowSec();
+        const auto& h = hold();
+        const bool held = shouldHold(g, m_levelId);
+        const bool goFlash = h.released && h.key == keyOf(g) && t - h.releasedAt < 0.9;
+        this->setVisible(held || goFlash);
+        if (!held && !goFlash) { m_lastBig.clear(); return; }
+        const bool loading = held && g.phase == "loading";
+        m_dim->setVisible(held);
+        m_panel->setVisible(loading);
+        m_title->setVisible(loading);
+        m_count->setVisible(loading);
+        m_names->setVisible(loading);
+        std::string big;
+        if (loading) {
+            m_count->setString(fmt::format("{} / {} ready", g.loaded, std::max(g.total, 1)).c_str());
+            std::string names;
+            for (auto& [n, ok] : g.who) names += (names.empty() ? "" : "   ") + std::string(ok ? "" : "...") + n;
+            m_names->setString(names.c_str());
+            m_names->limitLabelWidth(250.f, .3f, .12f);
+        } else if (held) {
+            big = std::to_string(std::max(1, static_cast<int>(std::ceil(g.goAt - t))));
+        } else big = "GO!";
+        if (big != m_lastBig) {
+            m_lastBig = big;
+            m_big->setString(big.c_str());
+            m_big->setVisible(!big.empty());
+            if (!big.empty()) {
+                m_big->stopAllActions();
+                m_big->setScale(2.4f);
+                m_big->setOpacity(255);
+                m_big->setColor(big == "GO!" ? cocos2d::ccColor3B { 120, 255, 140 } : cocos2d::ccColor3B { 255, 255, 255 });
+                m_big->runAction(cocos2d::CCSpawn::create(
+                    cocos2d::CCEaseBackOut::create(cocos2d::CCScaleTo::create(.3f, 1.5f)),
+                    cocos2d::CCSequence::create(cocos2d::CCDelayTime::create(.6f), cocos2d::CCFadeOut::create(.3f), nullptr), nullptr));
+                playGlimmerSound(big == "GO!" ? 1.5f : .9f, .7f);
+            }
+        }
+    }
+    int m_levelId = 0;
+    std::string m_lastBig;
+    cocos2d::CCLayerColor* m_dim = nullptr;
+    cocos2d::extension::CCScale9Sprite* m_panel = nullptr;
+    CCLabelBMFont* m_title = nullptr;
+    CCLabelBMFont* m_count = nullptr;
+    CCLabelBMFont* m_names = nullptr;
+    CCLabelBMFont* m_big = nullptr;
+};
+
+inline void attachOverlay(PlayLayer* pl, int levelId) {
+    if (pl && !pl->getChildByID("sor-gate-overlay"_spr)) pl->addChild(SorGateOverlay::create(levelId), 1003);
+}
+
+} // namespace sorrow::fair
+
+namespace sorrow::duels {
+inline void fairTick(float dt) { fair::tick(dt); }
+}

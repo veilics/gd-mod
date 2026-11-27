@@ -31,7 +31,8 @@ Sorrow Integration connects Geometry Dash to the **Sorrow Discord bot**. Your Gl
 - **Tournaments:** single-elimination cups for 4 or 8 players with an entry fee. 1st place gets 70% of the prize pool and 2nd gets 30%.
 - **Seasons:** every month ends with Glimmer rewards for your final rank, plus bonuses for the top 3.
 - **Ranked** duels move your Elo, from Bronze up to Champion. You get rank trophies, rank-up celebrations, a leaderboard and duel history.
-- Everyone is taken to each round's level and starts on a 3-2-1-GO countdown. An in-level panel shows the score, everyone's % and the clock.
+- **Fair starts:** everyone's game downloads the level and song first and waits in the level, then a 3-2-1-GO countdown starts the round for all players at once. An in-level panel shows the score, everyone's % and the clock.
+- **Rarity filter** (Featured, Epic, Legendary, Mythic), quick chat, head-to-head records and rank trophies.
 - Spectators can **side-bet** on who wins. Rematch with one tap.
 - **Globed:** players near you show up to challenge, and during a duel you only see your opponents.
 - Duel on a specific level with the **VS** button on any level page, or from Discord with /gd duel.

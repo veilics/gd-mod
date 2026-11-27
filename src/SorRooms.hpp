@@ -16,6 +16,8 @@
 //   * reportProgress      - every death / completion on the round level
 #pragma once
 
+#include <chrono>
+
 #include "SorUi.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
@@ -119,6 +121,9 @@ struct ActiveRoom
     std::vector<int> playerAccounts;   // GD account ids (Globed filter)
     std::int64_t roundLeftMs = 0;
     int roundSeconds = 0;
+    // fair start gate for the current round level
+    struct Gate { std::string phase; int round = 0, loaded = 0, total = 0; double goAt = 0; bool me = false; } gate;
+    std::vector<bool> playerLoaded;
     std::vector<std::string> winners;
     struct HistoryRow { int round = 0; std::string kind, levelName, winnerName, eliminated; int percent = 0, target = 0, team = -1; };
     std::vector<HistoryRow> history;
@@ -178,6 +183,18 @@ inline void applyRoomJson(const matjson::Value& r, ActiveRoom& out) {
     out.teamCount = static_cast<int>(r["teamCount"].asInt().unwrapOr(0));
     out.roundSeconds = static_cast<int>(r["roundSeconds"].asInt().unwrapOr(0));
     out.roundLeftMs = static_cast<std::int64_t>(r["roundLeftMs"].asInt().unwrapOr(0));
+    if (r["gate"].isObject()) {
+        const auto& g = r["gate"];
+        using namespace std::chrono;
+        const double now = duration<double>(steady_clock::now().time_since_epoch()).count();
+        out.gate.phase = g["phase"].asString().unwrapOr("");
+        out.gate.round = static_cast<int>(g["round"].asInt().unwrapOr(0));
+        out.gate.loaded = static_cast<int>(g["loaded"].asInt().unwrapOr(0));
+        out.gate.total = static_cast<int>(g["total"].asInt().unwrapOr(0));
+        const auto goIn = g["goIn"].asInt().unwrapOr(0);
+        out.gate.goAt = goIn == 0 && out.gate.phase != "countdown" ? 0.0 : now + goIn / 1000.0;
+        out.gate.me = g["me"].asBool().unwrapOr(false);
+    }
     if (auto arr = r["teams"].asArray())
         for (const auto& t : *arr)
             out.teams.push_back({ static_cast<int>(t["id"].asInt().unwrapOr(0)), t["name"].asString().unwrapOr(""),
@@ -242,6 +259,7 @@ inline void applyRoomJson(const matjson::Value& r, ActiveRoom& out) {
             out.playerTeams.push_back(static_cast<int>(p["team"].asInt().unwrapOr(0)));
             out.playerEliminated.push_back(p["eliminated"].asBool().unwrapOr(false));
             out.playerCleared.push_back(p["cleared"].asBool().unwrapOr(false));
+            out.playerLoaded.push_back(p["loaded"].asBool().unwrapOr(false));
             {
                 int acc = 0;
                 try { acc = std::stoi(p["gdAccountId"].asString().unwrapOr("0")); } catch (...) {}

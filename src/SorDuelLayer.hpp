@@ -83,51 +83,76 @@ inline std::string modeDesc(const std::string& m) {
     return "One attempt each - your first death counts";
 }
 
-// Rank trophy: GD's leaderboard trophy tinted for the tier, with sparkles
-// that get busier the higher the rank.
-inline cocos2d::CCNode* trophy(const std::string& rank, float size) {
-    static const std::map<std::string, std::pair<const char*, int>> m = {
-        { "Bronze", { "rankIcon_top1000_001.png", 0 } }, { "Silver", { "rankIcon_top500_001.png", 1 } },
-        { "Gold", { "rankIcon_top200_001.png", 2 } }, { "Platinum", { "rankIcon_top100_001.png", 3 } },
-        { "Diamond", { "rankIcon_top50_001.png", 5 } }, { "Champion", { "rankIcon_top10_001.png", 8 } } };
-    auto it = m.find(rank);
-    const auto [frame, sparkles] = it == m.end() ? std::pair<const char*, int> { "rankIcon_all_001.png", 0 } : it->second;
+// Rank trophy: the mod's own trophy art in the tier's metal (bronze, silver,
+// gold, platinum, diamond with a gem, champion with a crown), a soft glow
+// in the same colour, a light sweep and sparkles that get busier per tier.
+inline cocos2d::CCNode* trophy(const std::string& rank, float size, bool animated = true) {
+    static const std::map<std::string, int> sparkleCount = {
+        { "Bronze", 0 }, { "Silver", 2 }, { "Gold", 3 }, { "Platinum", 4 }, { "Diamond", 6 }, { "Champion", 9 } };
+    std::string key = rank;
+    for (auto& c : key) c = static_cast<char>(std::tolower(c));
+    if (!sparkleCount.contains(rank)) key = "bronze";
+    sorrow::ensureSprites();
+    const auto col = rankColor(rank);
     auto* node = cocos2d::CCNode::create();
     node->setContentSize({ size, size });
     node->setAnchorPoint({ .5f, .5f });
-    auto* glow = cocos2d::CCSprite::createWithSpriteFrameName("d_circle_02_001.png");
-    if (glow) {
-        glow->setColor(rankColor(rank));
-        glow->setOpacity(70);
+    if (auto* glow = cocos2d::CCSprite::createWithSpriteFrameName("d_circle_02_001.png")) {
+        glow->setColor(col);
+        glow->setOpacity(60);
         glow->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
-        glow->setScale(size * 1.3f / std::max(1.f, glow->getContentWidth()));
+        glow->setScale(size * 1.35f / std::max(1.f, glow->getContentWidth()));
         glow->setPosition({ size / 2.f, size / 2.f });
-        glow->runAction(cocos2d::CCRepeatForever::create(cocos2d::CCSequence::create(
-            cocos2d::CCFadeTo::create(1.2f, 120), cocos2d::CCFadeTo::create(1.2f, 50), nullptr)));
+        if (animated) glow->runAction(cocos2d::CCRepeatForever::create(cocos2d::CCSequence::create(
+            cocos2d::CCFadeTo::create(1.2f, 120), cocos2d::CCFadeTo::create(1.2f, 45), nullptr)));
         node->addChild(glow);
     }
-    auto* spr = cocos2d::CCSprite::createWithSpriteFrameName(frame);
-    if (!spr) spr = cocos2d::CCSprite::createWithSpriteFrameName("GJ_achImage_001.png");
+    auto* spr = cocos2d::CCSprite::createWithSpriteFrameName(fmt::format("trophy_{}.png", key).c_str());
+    if (!spr) { spr = cocos2d::CCSprite::createWithSpriteFrameName("rankIcon_all_001.png"); if (spr) spr->setColor(col); }
     if (spr) {
         spr->setScale(size / std::max(1.f, std::max(spr->getContentWidth(), spr->getContentHeight())));
         spr->setPosition({ size / 2.f, size / 2.f });
         node->addChild(spr);
+        if (animated) spr->runAction(cocos2d::CCRepeatForever::create(cocos2d::CCSequence::create(
+            cocos2d::CCEaseSineInOut::create(cocos2d::CCMoveBy::create(1.4f, { 0.f, size * .03f })),
+            cocos2d::CCEaseSineInOut::create(cocos2d::CCMoveBy::create(1.4f, { 0.f, -size * .03f })), nullptr)));
     }
+    const int sparkles = animated && sparkleCount.contains(rank) ? sparkleCount.at(rank) : 0;
     for (int i = 0; i < sparkles; ++i) {
         auto* sp = cocos2d::CCSprite::createWithSpriteFrameName("star_small01_001.png");
         if (!sp) break;
-        sp->setColor(rankColor(rank));
+        sp->setColor(i % 2 ? cocos2d::ccColor3B { 255, 255, 255 } : col);
         sp->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
         sp->setScale(0.f);
-        const float ang = i * 6.2831f / sparkles;
-        sp->setPosition({ size / 2.f + std::cos(ang) * size * .55f, size / 2.f + std::sin(ang) * size * .5f });
-        const float d = .15f * i;
+        const float ang = i * 6.2831f / sparkles + .4f;
+        sp->setPosition({ size / 2.f + std::cos(ang) * size * .5f, size / 2.f + std::sin(ang) * size * .48f });
+        const float d = .17f * i;
         sp->runAction(cocos2d::CCRepeatForever::create(cocos2d::CCSequence::create(
-            cocos2d::CCDelayTime::create(d), cocos2d::CCScaleTo::create(.35f, .5f), cocos2d::CCScaleTo::create(.35f, 0.f),
-            cocos2d::CCDelayTime::create(1.2f - d), nullptr)));
+            cocos2d::CCDelayTime::create(d), cocos2d::CCScaleTo::create(.3f, .45f), cocos2d::CCScaleTo::create(.3f, 0.f),
+            cocos2d::CCDelayTime::create(1.4f - d), nullptr)));
         node->addChild(sp);
     }
     return node;
+}
+
+// Elo needed for each tier, and progress towards the next one.
+inline std::pair<int, int> rankBand(int elo) {
+    static const int cuts[] = { 0, 1100, 1250, 1400, 1550, 1700 };
+    for (int i = 5; i >= 0; --i)
+        if (elo >= cuts[i]) return { cuts[i], i < 5 ? cuts[i + 1] : -1 };
+    return { 0, 1100 };
+}
+inline std::string nextRank(const std::string& r) {
+    static const std::vector<std::string> order = { "Bronze", "Silver", "Gold", "Platinum", "Diamond", "Champion" };
+    auto it = std::find(order.begin(), order.end(), r);
+    return it == order.end() || it + 1 == order.end() ? std::string() : *(it + 1);
+}
+inline std::string rarityName(const std::string& r) {
+    if (r == "featured") return "Featured";
+    if (r == "epic") return "Epic";
+    if (r == "legendary") return "Legendary";
+    if (r == "mythic") return "Mythic";
+    return "";
 }
 
 // ----------------------------------------------------------------- popups --
@@ -317,62 +342,67 @@ protected:
         const float x0 = 92.f, segW = W - x0 - 14.f;
 
         // mode
-        auto* ml = rowLabel("Mode"); ml->setPosition({ 20.f, 240.f }); m_body->addChild(ml);
-        this->segment(menu, x0, 240.f, segW, { { "race", "Race" }, { "showdown", "Showdown" }, { "consistency", "Consistency" }, { "sudden", "Sudden" } },
+        auto* ml = rowLabel("Mode"); ml->setPosition({ 20.f, 268.f }); m_body->addChild(ml);
+        this->segment(menu, x0, 268.f, segW, { { "race", "Race" }, { "showdown", "Showdown" }, { "consistency", "Consistency" }, { "sudden", "Sudden" } },
             m_o.mode, [this](std::string v) { m_o.mode = v; });
         auto* md = label(modeDesc(m_o.mode), "bigFont.fnt", .3f, { 200, 200, 225 });
         md->limitLabelWidth(segW, .3f, .12f);
-        md->setPosition({ x0 + segW / 2.f, 222.f });
+        md->setPosition({ x0 + segW / 2.f, 250.f });
         m_body->addChild(md);
 
         // rounds + ranked (duel) / size (tour)
-        auto* bl = rowLabel("Best of"); bl->setPosition({ 20.f, 194.f }); m_body->addChild(bl);
+        auto* bl = rowLabel("Best of"); bl->setPosition({ 20.f, 222.f }); m_body->addChild(bl);
         const float boW = 150.f;
-        this->segment(menu, x0, 194.f, boW, { { "1", "1" }, { "3", "3" }, { "5", "5" } }, std::to_string(m_o.bestOf),
+        this->segment(menu, x0, 222.f, boW, { { "1", "1" }, { "3", "3" }, { "5", "5" } }, std::to_string(m_o.bestOf),
             [this](std::string v) { m_o.bestOf = std::stoi(v); });
         if (m_kind == "duel")
-            this->segment(menu, x0 + boW + 14.f, 194.f, segW - boW - 14.f, { { "1", "Ranked" }, { "0", "Casual" } }, m_o.ranked ? "1" : "0",
+            this->segment(menu, x0 + boW + 14.f, 222.f, segW - boW - 14.f, { { "1", "Ranked" }, { "0", "Casual" } }, m_o.ranked ? "1" : "0",
                 [this](std::string v) { m_o.ranked = v == "1"; });
         else if (m_kind == "tour")
-            this->segment(menu, x0 + boW + 14.f, 194.f, segW - boW - 14.f, { { "4", "4 Players" }, { "8", "8 Players" } }, std::to_string(m_cupSize),
+            this->segment(menu, x0 + boW + 14.f, 222.f, segW - boW - 14.f, { { "4", "4 Players" }, { "8", "8 Players" } }, std::to_string(m_cupSize),
                 [this](std::string v) { m_cupSize = std::stoi(v); });
 
         // target % (race) or time limit
         const bool race = m_o.mode == "race";
-        auto* tl = rowLabel(race ? "Target" : "Time limit"); tl->setPosition({ 20.f, 160.f }); m_body->addChild(tl);
+        auto* tl = rowLabel(race ? "Target" : "Time limit"); tl->setPosition({ 20.f, 188.f }); m_body->addChild(tl);
         auto* minus = button("-", "GJ_button_04.png", .6f, [this, race] {
             if (race) m_o.target = std::max(5, m_o.target - 5); else m_o.seconds = std::max(60, m_o.seconds - 60);
             this->rebuild(); });
-        minus->setPosition({ x0 + 16.f, 160.f });
+        minus->setPosition({ x0 + 16.f, 188.f });
         menu->addChild(minus);
         auto* vbg = sorrow::ui::panel(70.f, 26.f, { 0, 0, 0 }, 90);
-        vbg->setPosition({ x0 + 62.f, 160.f });
+        vbg->setPosition({ x0 + 62.f, 188.f });
         m_body->addChild(vbg);
         auto* tv = label(race ? fmt::format("{}%", m_o.target) : fmt::format("{}:00", m_o.seconds / 60), "bigFont.fnt", .45f);
-        tv->setPosition({ x0 + 62.f, 160.f });
+        tv->setPosition({ x0 + 62.f, 188.f });
         m_body->addChild(tv);
         auto* plus = button("+", "GJ_button_04.png", .6f, [this, race] {
             if (race) m_o.target = std::min(100, m_o.target + 5); else m_o.seconds = std::min(900, m_o.seconds + 60);
             this->rebuild(); });
-        plus->setPosition({ x0 + 108.f, 160.f });
+        plus->setPosition({ x0 + 108.f, 188.f });
         menu->addChild(plus);
         if (race) {
             auto* hint = label(m_o.target >= 100 ? "Completion race" : "Highest % wins if time runs out", "bigFont.fnt", .24f, { 180, 180, 205 }, { 0.f, .5f });
             hint->limitLabelWidth(segW - 132.f, .24f, .1f);
-            hint->setPosition({ x0 + 128.f, 160.f });
+            hint->setPosition({ x0 + 128.f, 188.f });
             m_body->addChild(hint);
         }
 
+        // rarity filter
+        auto* rl = rowLabel("Rarity"); rl->setPosition({ 20.f, 154.f }); m_body->addChild(rl);
+        this->segment(menu, x0, 154.f, segW, { { "any", "Any" }, { "featured", "Featured" }, { "epic", "Epic" },
+            { "legendary", "Legendary" }, { "mythic", "Mythic" } }, m_o.rarity, [this](std::string v) { m_o.rarity = v; });
+
         // level
-        auto* ll = rowLabel("Level"); ll->setPosition({ 20.f, 122.f }); m_body->addChild(ll);
+        auto* ll = rowLabel("Level"); ll->setPosition({ 20.f, 118.f }); m_body->addChild(ll);
         auto* lbg = sorrow::ui::panel(segW, 34.f, { 0, 0, 0 }, 90);
         lbg->setAnchorPoint({ 0.f, .5f });
-        lbg->setPosition({ x0, 122.f });
+        lbg->setPosition({ x0, 118.f });
         m_body->addChild(lbg);
         if (m_level && m_kind != "tour") {
             auto* lv = label(std::string(m_level->m_levelName), "goldFont.fnt", .55f, { 255, 230, 150 });
             lv->limitLabelWidth(segW - 20.f, .55f, .25f);
-            lv->setPosition({ x0 + segW / 2.f, 122.f });
+            lv->setPosition({ x0 + segW / 2.f, 118.f });
             m_body->addChild(lv);
         } else {
             const auto it = std::find(kDiffs.begin(), kDiffs.end(), m_o.difficulty);
@@ -380,20 +410,20 @@ protected:
             auto* left = CCMenuItemExt::createSpriteExtraWithFrameName("navArrowBtn_001.png", .4f, [this, idx](CCMenuItemSpriteExtra*) {
                 m_o.difficulty = kDiffs[(idx + kDiffs.size() - 1) % kDiffs.size()]; this->rebuild(); });
             left->setScaleX(-1.f);
-            left->setPosition({ x0 + 16.f, 122.f });
+            left->setPosition({ x0 + 16.f, 118.f });
             menu->addChild(left);
             if (auto* face = cocos2d::CCSprite::createWithSpriteFrameName(diffFrame(m_o.difficulty))) {
                 face->setScale(.5f);
-                face->setPosition({ x0 + segW / 2.f - 50.f, 124.f });
+                face->setPosition({ x0 + segW / 2.f - 50.f, 120.f });
                 m_body->addChild(face);
             }
             auto* dn = label(diffName(m_o.difficulty), "bigFont.fnt", .38f, { 255, 255, 255 }, { 0.f, .5f });
             dn->limitLabelWidth(130.f, .38f, .2f);
-            dn->setPosition({ x0 + segW / 2.f - 30.f, 122.f });
+            dn->setPosition({ x0 + segW / 2.f - 30.f, 118.f });
             m_body->addChild(dn);
             auto* right = CCMenuItemExt::createSpriteExtraWithFrameName("navArrowBtn_001.png", .4f, [this, idx](CCMenuItemSpriteExtra*) {
                 m_o.difficulty = kDiffs[(idx + 1) % kDiffs.size()]; this->rebuild(); });
-            right->setPosition({ x0 + segW - 16.f, 122.f });
+            right->setPosition({ x0 + segW - 16.f, 118.f });
             menu->addChild(right);
         }
         const char* hintText = m_kind == "race" ? "Anyone can join from the Races tab - winner takes the whole pot"
@@ -426,7 +456,7 @@ protected:
         if (m_kind == "tour") {
             TourOptions t;
             t.mode = m_o.mode; t.difficulty = m_o.difficulty; t.size = m_cupSize; t.bestOf = m_o.bestOf;
-            t.target = m_o.target; t.seconds = m_o.seconds; t.entry = stake;
+            t.target = m_o.target; t.seconds = m_o.seconds; t.entry = stake; t.rarity = m_o.rarity;
             duels::tourCreate(t, finish("Tournament opened"));
             return;
         }
@@ -445,7 +475,7 @@ public:
         r->m_o.ranked = kind == "duel";
         r->m_level = level;
         r->m_done = std::move(done);
-        if (r->init(450.f, 290.f)) { r->setup(); r->autorelease(); return r; }
+        if (r->init(450.f, 322.f)) { r->setup(); r->autorelease(); return r; }
         delete r;
         return nullptr;
     }
@@ -483,9 +513,12 @@ protected:
             auto* pos = label(fmt::format("#{}", r.pos), "goldFont.fnt", .4f, r.pos <= 3 ? cocos2d::ccColor3B { 255, 215, 80 } : cocos2d::ccColor3B { 255, 255, 255 }, { 0.f, .5f });
             pos->setPosition({ x + 4.f, y });
             m_mainLayer->addChild(pos);
+            auto* tr = trophy(r.rank, 14.f, false);
+            tr->setPosition({ x + 33.f, y });
+            m_mainLayer->addChild(tr);
             auto* nm = label(r.name, "bigFont.fnt", .3f, { 255, 255, 255 }, { 0.f, .5f });
-            nm->limitLabelWidth(70.f, .3f, .15f);
-            nm->setPosition({ x + 28.f, y });
+            nm->limitLabelWidth(62.f, .3f, .15f);
+            nm->setPosition({ x + 43.f, y });
             m_mainLayer->addChild(nm);
             auto* el = label(fmt::format("{} {}", r.elo, r.rank), "goldFont.fnt", .35f, rankColor(r.rank), { 1.f, .5f });
             el->setPosition({ x + colW - 40.f, y });
@@ -620,6 +653,38 @@ public:
     }
 };
 
+// Quick chat during a duel.
+class SorEmotePopup : public geode::Popup {
+protected:
+    std::string m_id;
+    bool setup() {
+        this->setTitle("Quick Chat", "goldFont.fnt", .65f, 16.f);
+        auto* menu = CCMenu::create();
+        menu->setPosition({ 0.f, 0.f });
+        m_mainLayer->addChild(menu);
+        const std::pair<const char*, const char*> em[] = { { "gl", "Good luck!" }, { "gg", "GG!" }, { "nice", "Nice!" }, { "close", "So close!" },
+            { "wow", "WOW" }, { "oops", "Oops..." }, { "ez", "EZ" }, { "rematch", "Rematch?" } };
+        for (int i = 0; i < 8; ++i) {
+            const std::string key = em[i].first;
+            auto* b = button(em[i].second, i % 2 ? "GJ_button_02.png" : "GJ_button_01.png", .55f, [this, key] {
+                sorrow::duels::emote(m_id, key);
+                this->onClose(nullptr);
+            });
+            b->setPosition({ m_size.width * ((i % 4) + .5f) / 4.f, m_size.height - 52.f - (i / 4) * 34.f });
+            menu->addChild(b);
+        }
+        return true;
+    }
+public:
+    static SorEmotePopup* create(const std::string& id) {
+        auto* r = new SorEmotePopup();
+        r->m_id = id;
+        if (r->init(330.f, 125.f)) { r->setup(); r->autorelease(); return r; }
+        delete r;
+        return nullptr;
+    }
+};
+
 inline void openSideBet(const Duel& d, const Player& on) {
     if (glimmerBalance() <= 0) { Notification::create("You have no Glimmer to bet", NotificationIcon::Warning)->show(); return; }
     const auto id = d.id, uid = on.uid, name = on.name;
@@ -679,6 +744,28 @@ public:
                 this->addChild(art, -2);
             }
         }
+        // drifting squares (GD-menu style) behind everything
+        for (int i = 0; i < 16; ++i) {
+            const float sz = 10.f + (std::rand() % 26);
+            auto* sq = cocos2d::CCLayerColor::create({ 255, 255, 255, static_cast<GLubyte>(10 + std::rand() % 20) }, sz, sz);
+            sq->ignoreAnchorPointForPosition(false);
+            sq->setAnchorPoint({ .5f, .5f });
+            sq->setRotation(static_cast<float>(std::rand() % 90));
+            sq->setPosition({ static_cast<float>(std::rand() % static_cast<int>(m_w)), static_cast<float>(std::rand() % static_cast<int>(m_h)) });
+            this->addChild(sq, -2);
+            const float t = 9.f + (std::rand() % 9);
+            sq->runAction(cocos2d::CCRepeatForever::create(cocos2d::CCSequence::create(
+                cocos2d::CCSpawn::create(cocos2d::CCMoveBy::create(t, { 0.f, m_h + 60.f }), cocos2d::CCRotateBy::create(t, 120.f), nullptr),
+                cocos2d::CCMoveBy::create(0.f, { 0.f, -(m_h + 60.f) }), nullptr)));
+        }
+        auto* titleGlow = label("VERSUS", "goldFont.fnt", 1.f, { 255, 190, 60 });
+        titleGlow->setPosition({ m_w / 2.f, m_h - 20.f });
+        titleGlow->setBlendFunc({ GL_SRC_ALPHA, GL_ONE });
+        titleGlow->setOpacity(60);
+        titleGlow->runAction(cocos2d::CCRepeatForever::create(cocos2d::CCSequence::create(
+            cocos2d::CCSpawn::create(cocos2d::CCScaleTo::create(1.4f, 1.08f), cocos2d::CCFadeTo::create(1.4f, 110), nullptr),
+            cocos2d::CCSpawn::create(cocos2d::CCScaleTo::create(1.4f, 1.f), cocos2d::CCFadeTo::create(1.4f, 40), nullptr), nullptr)));
+        this->addChild(titleGlow);
         auto* title = label("VERSUS", "goldFont.fnt", .95f);
         title->setPosition({ m_w / 2.f, m_h - 20.f });
         this->addChild(title);
@@ -864,61 +951,82 @@ private:
         using namespace sorrow::duels;
         const auto& s = state();
         const auto& me = s.me;
-        auto* bg = sorrow::ui::panel(w, h, { 0, 0, 0 }, 120);
+        const auto col = rankColor(me.rank);
+        // card: dark glass with a rank-coloured top band
+        auto* bg = sorrow::ui::panel(w, h, { 0, 0, 0 }, 130);
         bg->setAnchorPoint({ 0.f, 0.f });
         bg->setPosition({ x, y });
         m_dyn->addChild(bg);
+        auto* band = sorrow::ui::panel(w - 6.f, 74.f, col, 55);
+        band->setAnchorPoint({ 0.f, 1.f });
+        band->setPosition({ x + 3.f, y + h - 3.f });
+        m_dyn->addChild(band);
         const float cx = x + w / 2.f;
-        float yy = y + h - 11.f;
-        // season header
+        float yy = y + h - 10.f;
         if (!s.season.name.empty()) {
             const int left = std::max(0, static_cast<int>((s.season.endsAt - nowSec()) / 86400.0));
-            auto* sh = label(fmt::format("SEASON {}", s.season.name), "bigFont.fnt", .22f, { 160, 200, 255 });
-            sh->limitLabelWidth(w - 10.f, .22f, .12f);
+            auto* sh = label(fmt::format("SEASON {}  -  {}", s.season.name, left > 0 ? fmt::format("{}d left", left) : std::string("ends today")),
+                "bigFont.fnt", .19f, { 225, 235, 255 });
+            sh->limitLabelWidth(w - 10.f, .19f, .1f);
             sh->setPosition({ cx, yy });
             m_dyn->addChild(sh);
-            yy -= 9.f;
-            auto* sl = label(left > 0 ? fmt::format("ends in {}d", left) : std::string("ends today"), "bigFont.fnt", .2f, { 150, 150, 180 });
-            sl->setPosition({ cx, yy });
-            m_dyn->addChild(sl);
         }
-        yy -= 30.f;
-        auto* tr = trophy(me.rank, 40.f);
+        yy -= 34.f;
+        auto* tr = trophy(me.rank, 50.f);
         tr->setPosition({ cx, yy });
         m_dyn->addChild(tr);
-        yy -= 30.f;
-        auto* rk = label(me.rank, "goldFont.fnt", .62f, rankColor(me.rank));
+        yy -= 36.f;
+        auto* rk = label(me.rank, "goldFont.fnt", .6f, col);
         rk->setPosition({ cx, yy });
         m_dyn->addChild(rk);
-        yy -= 15.f;
-        auto* elo = label(fmt::format("{} Elo{}", me.elo, me.position > 0 ? fmt::format("  #{}", me.position) : ""), "bigFont.fnt", .34f);
+        yy -= 14.f;
+        auto* elo = label(fmt::format("{} Elo{}", me.elo, me.position > 0 ? fmt::format("   #{}", me.position) : ""), "bigFont.fnt", .32f);
         elo->setPosition({ cx, yy });
         m_dyn->addChild(elo);
-        yy -= 11.f;
-        auto* peak = label(fmt::format("Peak {} {}", me.peakRank, me.peakElo), "bigFont.fnt", .22f, rankColor(me.peakRank));
-        peak->setPosition({ cx, yy });
-        m_dyn->addChild(peak);
+        // progress to the next tier
+        yy -= 13.f;
+        const auto [lo, hi] = rankBand(me.elo);
+        const float barW = w - 26.f;
+        auto* track = cocos2d::CCLayerColor::create({ 255, 255, 255, 40 }, barW, 5.f);
+        track->setPosition({ cx - barW / 2.f, yy - 2.5f });
+        m_dyn->addChild(track);
+        const float frac = hi < 0 ? 1.f : std::clamp((me.elo - lo) / static_cast<float>(hi - lo), 0.f, 1.f);
+        auto* fill = cocos2d::CCLayerGradient::create({ col.r, col.g, col.b, 255 }, { 255, 255, 255, 255 }, { 1.f, 0.f });
+        fill->setContentSize({ std::max(1.f, barW * frac), 5.f });
+        fill->setAnchorPoint({ 0.f, 0.f });           // grow from the left edge
+        fill->setPosition(track->getPosition());
+        fill->setScaleX(0.f);
+        m_dyn->addChild(fill);
+        fill->runAction(cocos2d::CCEaseOut::create(cocos2d::CCScaleTo::create(.8f, 1.f, 1.f), 2.f));
+        yy -= 10.f;
+        auto* nx = label(hi < 0 ? std::string("Top tier!") : fmt::format("{} Elo to {}", hi - me.elo, nextRank(me.rank)), "bigFont.fnt", .19f,
+            { 190, 200, 230 });
+        nx->setPosition({ cx, yy });
+        m_dyn->addChild(nx);
         yy -= 20.f;
         const std::tuple<const char*, int, cocos2d::ccColor3B> cols[] = {
             { "WINS", me.w, { 90, 230, 120 } }, { "LOSSES", me.l, { 255, 100, 100 } }, { "CUPS", me.tourWins, { 255, 205, 60 } } };
         for (int i = 0; i < 3; ++i) {
             const float xx = x + w * (i + .5f) / 3.f;
-            auto* n = label(std::to_string(std::get<1>(cols[i])), "goldFont.fnt", .5f, std::get<2>(cols[i]));
+            auto* n = label(std::to_string(std::get<1>(cols[i])), "goldFont.fnt", .48f, std::get<2>(cols[i]));
             n->setPosition({ xx, yy });
             m_dyn->addChild(n);
-            auto* t = label(std::get<0>(cols[i]), "bigFont.fnt", .17f, { 170, 170, 190 });
+            auto* t = label(std::get<0>(cols[i]), "bigFont.fnt", .16f, { 170, 170, 190 });
             t->setPosition({ xx, yy - 10.f });
             m_dyn->addChild(t);
         }
-        yy -= 25.f;
-        const std::string streak = me.streak > 0 ? fmt::format("{} win streak", me.streak) : me.streak < 0 ? fmt::format("{} losses in a row", -me.streak) : "No streak";
-        auto* st = label(streak, "bigFont.fnt", .24f, me.streak >= 3 ? cocos2d::ccColor3B { 255, 170, 60 } : cocos2d::ccColor3B { 220, 220, 220 });
+        yy -= 24.f;
+        const int games = me.w + me.l + me.d;
+        const std::string streak = me.streak > 0 ? fmt::format("{} win streak", me.streak) : me.streak < 0 ? fmt::format("{} loss streak", -me.streak) : "No streak";
+        auto* st = label(fmt::format("{}% win rate  -  {}", games ? me.w * 100 / games : 0, streak), "bigFont.fnt", .2f,
+            me.streak >= 3 ? cocos2d::ccColor3B { 255, 170, 60 } : cocos2d::ccColor3B { 220, 220, 230 });
+        st->limitLabelWidth(w - 10.f, .2f, .1f);
         st->setPosition({ cx, yy });
         m_dyn->addChild(st);
-        yy -= 11.f;
-        auto* earned = label(fmt::format("Earnings {}{}", me.earned < 0 ? "-" : "+", sorrow::formatGlimmer(std::llabs(me.earned))), "bigFont.fnt", .22f,
-            me.earned >= 0 ? cocos2d::ccColor3B { 255, 220, 110 } : cocos2d::ccColor3B { 255, 130, 110 });
-        earned->limitLabelWidth(w - 12.f, .22f, .12f);
+        yy -= 10.f;
+        auto* earned = label(fmt::format("Peak {} {}  -  Earnings {}{}", me.peakRank, me.peakElo, me.earned < 0 ? "-" : "+", sorrow::formatGlimmer(std::llabs(me.earned))),
+            "bigFont.fnt", .19f, me.earned >= 0 ? cocos2d::ccColor3B { 255, 220, 110 } : cocos2d::ccColor3B { 255, 130, 110 });
+        earned->limitLabelWidth(w - 10.f, .19f, .1f);
         earned->setPosition({ cx, yy });
         m_dyn->addChild(earned);
 
@@ -1120,8 +1228,9 @@ private:
             nm->limitLabelWidth(iw * .45f, .45f, .2f);
             nm->setPosition({ x0 + 36.f, y + 7.f });
             m_dyn->addChild(nm);
-            auto* sub = label(fmt::format("{}  -  {}/{} players  -  {}{}", t.modeName, t.players.size(), t.size,
-                diffName(t.difficulty), t.state == "running" ? "  -  LIVE" : ""), "bigFont.fnt", .22f, { 190, 190, 215 }, { 0.f, .5f });
+            auto* sub = label(fmt::format("{}  -  {}/{} players  -  {}{}{}", t.modeName, t.players.size(), t.size,
+                diffName(t.difficulty), rarityName(t.rarity).empty() ? "" : " " + rarityName(t.rarity), t.state == "running" ? "  -  LIVE" : ""),
+                "bigFont.fnt", .22f, { 190, 190, 215 }, { 0.f, .5f });
             sub->limitLabelWidth(iw * .55f, .22f, .1f);
             sub->setPosition({ x0 + 36.f, y - 8.f });
             m_dyn->addChild(sub);
@@ -1292,7 +1401,7 @@ private:
                     for (auto& p : d.players) sc += (sc.empty() ? "" : "-") + std::to_string(p.wins);
                     sub = fmt::format("Round {} - {} - {}", std::max(1, d.round), sc, sub);
                 }
-            } else sub += " - " + diffName(d.difficulty);
+            } else sub += " - " + diffName(d.difficulty) + (rarityName(d.rarity).empty() ? "" : " " + rarityName(d.rarity));
             auto* sl = label(sub, "bigFont.fnt", .24f, { 180, 180, 205 }, { 0.f, .5f });
             sl->limitLabelWidth(m_pw * .55f, .24f, .12f);
             sl->setPosition({ tx, y - 7.f });
@@ -1362,6 +1471,11 @@ private:
         }
         if (d.state == "intermission")
             return d.round == 0 ? "Rolling a level..." : fmt::format("Next round in {}...", std::max(0, static_cast<int>(std::ceil(d.nextAt - t)) + 6));
+        if (d.state == "loading") {
+            int ready = 0, total = 0;
+            for (auto& p : d.players) if (!p.forfeited) { total++; ready += p.loaded; }
+            return fmt::format("Round {} - loading {} - {}/{} in the level", d.round, d.levelName, ready, total);
+        }
         if (d.state == "countdown")
             return fmt::format("Round {} - {} starts in {}", d.round, d.levelName, std::max(0, static_cast<int>(std::ceil(d.startAt - t))));
         if (d.state == "playing") {
@@ -1390,6 +1504,7 @@ private:
         // header: mode summary, difficulty / level, pot
         std::string head = d.summary();
         if (d.ranked) head += " - Ranked";
+        if (!rarityName(d.rarity).empty()) head += " - " + rarityName(d.rarity);
         if (!d.tourId.empty()) head = "CUP - " + head;
         else if (d.queued) head = (d.ranked ? "RANKED MATCH - " : "CASUAL MATCH - ") + head;
         if (!mine) head = "WATCHING - " + head;
@@ -1431,13 +1546,20 @@ private:
         }
         if (playersShown.size() <= 2) {
             // VS layout
+            const unsigned firstCardNode = m_dyn->getChildrenCount();
+            const unsigned firstCardBtn = m_menu->getChildrenCount();
             for (size_t i = 0; i < playersShown.size(); ++i) {
                 const auto& p = playersShown[i];
                 const float x = m_px + m_pw * (i == 0 ? .22f : .78f);
                 const bool isMe = p.uid == me.uid;
-                auto* ring = sorrow::ui::panel(64.f, 64.f, isMe ? cocos2d::ccColor3B { 60, 150, 80 } : cocos2d::ccColor3B { 40, 40, 60 }, 110);
+                const auto rc = p.rank == "?" ? cocos2d::ccColor3B { 90, 90, 110 } : rankColor(p.rank);
+                auto* glowRing = sorrow::ui::panel(72.f, 72.f, rc, 60);
+                glowRing->setPosition({ x, midY + 16.f });
+                m_dyn->addChild(glowRing);
+                auto* ring = sorrow::ui::panel(64.f, 64.f, isMe ? cocos2d::ccColor3B { 40, 110, 60 } : cocos2d::ccColor3B { 25, 25, 45 }, 170);
                 ring->setPosition({ x, midY + 16.f });
                 m_dyn->addChild(ring);
+
                 if (d.state == "invite" && i == 1) {
                     auto* q = label("?", "goldFont.fnt", 1.2f, { 200, 200, 200 });
                     q->setPosition({ x, midY + 16.f });
@@ -1452,8 +1574,12 @@ private:
                 nm->setPosition({ x, midY - 26.f });
                 m_dyn->addChild(nm);
                 if (p.rank != "?") {
-                    auto* rk = label(fmt::format("{} - {}", p.rank, p.elo), "bigFont.fnt", .25f, rankColor(p.rank));
-                    rk->setPosition({ x, midY - 39.f });
+                    auto* rk = label(fmt::format("{} {}", p.rank, p.elo), "bigFont.fnt", .25f, rankColor(p.rank), { 0.f, .5f });
+                    auto* tr = trophy(p.rank, 13.f, false);
+                    const float tw = 15.f + rk->getScaledContentWidth();
+                    tr->setPosition({ x - tw / 2.f + 6.f, midY - 39.f });
+                    rk->setPosition({ x - tw / 2.f + 15.f, midY - 39.f });
+                    m_dyn->addChild(tr);
                     m_dyn->addChild(rk);
                 }
                 // win pips
@@ -1465,7 +1591,12 @@ private:
                     m_dyn->addChild(pip);
                 }
                 // this round's best %
-                if (d.racing() || d.state == "intermission") {
+                if (d.state == "loading") {
+                    auto* ld = label(p.loaded ? "IN THE LEVEL" : "LOADING...", "bigFont.fnt", .24f,
+                        p.loaded ? cocos2d::ccColor3B { 120, 255, 140 } : cocos2d::ccColor3B { 255, 200, 100 });
+                    ld->setPosition({ x, midY + 54.f });
+                    m_dyn->addChild(ld);
+                } else if (d.racing() || d.state == "intermission") {
                     const std::string pcText = d.mode == "sudden" && !p.done && d.racing() ? std::string("alive")
                         : d.mode == "consistency" ? fmt::format("avg {}%  ({} runs)", p.pct, p.attempts) : fmt::format("{}%", p.pct);
                     auto* pc = label(pcText, "bigFont.fnt", .3f, { 255, 255, 255 });
@@ -1496,9 +1627,39 @@ private:
                     m_dyn->addChild(sb);
                 }
             }
-            auto* vs = label("VS", "goldFont.fnt", 1.1f, { 255, 120, 80 });
+            if (m_splashFor != d.id) {
+                // the two fighters slide in from their sides
+                auto slide = [cx](cocos2d::CCArray* arr, unsigned from) {
+                    for (unsigned k = from; k < arr->count(); ++k) {
+                        auto* n = static_cast<cocos2d::CCNode*>(arr->objectAtIndex(k));
+                        const float dx = n->getPositionX() < cx ? -150.f : 150.f;
+                        n->setPositionX(n->getPositionX() + dx);
+                        n->runAction(cocos2d::CCEaseBackOut::create(cocos2d::CCMoveBy::create(.45f, { -dx, 0.f })));
+                    }
+                };
+                slide(m_dyn->getChildren(), firstCardNode);
+                slide(m_menu->getChildren(), firstCardBtn);
+            }
+            auto* vs = label("VS", "goldFont.fnt", 1.15f, { 255, 120, 80 });
             vs->setPosition({ cx, midY + 22.f });
             m_dyn->addChild(vs);
+            vs->runAction(cocos2d::CCRepeatForever::create(cocos2d::CCSequence::create(
+                cocos2d::CCScaleTo::create(.6f, 1.25f), cocos2d::CCScaleTo::create(.6f, 1.15f), nullptr)));
+            if (m_splashFor != d.id) {
+                vs->setScale(3.f);
+                vs->setOpacity(0);
+                vs->runAction(cocos2d::CCSpawn::create(cocos2d::CCEaseBackOut::create(cocos2d::CCScaleTo::create(.4f, 1.15f)),
+                    cocos2d::CCFadeIn::create(.2f), nullptr));
+                auto* flash = cocos2d::CCLayerColor::create({ 255, 255, 255, 120 });
+                this->addChild(flash, 50);
+                flash->runAction(cocos2d::CCSequence::create(cocos2d::CCFadeOut::create(.35f), cocos2d::CCRemoveSelf::create(), nullptr));
+            }
+            if (d.hasH2h && mine) {
+                auto* h2 = label(fmt::format("Head-to-head  {}W {}L{}", d.h2hW, d.h2hL, d.h2hD ? fmt::format(" {}D", d.h2hD) : ""),
+                    "bigFont.fnt", .2f, { 200, 210, 255 });
+                h2->setPosition({ cx, midY - 34.f });
+                m_dyn->addChild(h2);
+            }
             if (playersShown.size() == 2 && d.state != "invite") {
                 auto* score = label(fmt::format("{} - {}", playersShown[0].wins, playersShown[1].wins), "bigFont.fnt", .6f);
                 score->setPosition({ cx, midY - 6.f });
@@ -1585,6 +1746,7 @@ private:
             btns.push_back(button(d.hostId == me.uid ? "Close Race" : "Leave", "GJ_button_06.png", .55f, [id] {
                 sorrow::duels::act("duels/leave", id, [](bool, std::string) { sorrow::refreshBalance(); }); }));
         } else if (d.live()) {
+            btns.push_back(button("Chat", "GJ_button_05.png", .55f, [id] { if (auto* p = SorEmotePopup::create(id)) p->show(); }));
             if (d.racing() && d.levelId > 0)
                 btns.push_back(button("Go to Level", "GJ_button_01.png", .55f, [] { sorrow::duels::DuelDirector::get()->pokeNow(); goToRound(); }));
             btns.push_back(button("Forfeit", "GJ_button_06.png", .55f, [id] {
@@ -1593,6 +1755,7 @@ private:
                 });
             }));
         } else if (d.state == "finished") {
+            btns.push_back(button("GG", "GJ_button_05.png", .55f, [id] { sorrow::duels::emote(id, "gg"); }));
             if (d.kind == "duel")
                 btns.push_back(button("Rematch", "GJ_button_01.png", .55f, [id] {
                     sorrow::duels::act("duels/rematch", id, [](bool ok, std::string err) {
@@ -1607,6 +1770,7 @@ private:
         }
         for (auto* b : btns) m_menu->addChild(b);
         sorrow::ui::row(btns, cx, m_py + 16.f, 8.f);
+        m_splashFor = d.id;
     }
 
     static void goToRound() {
@@ -1632,6 +1796,7 @@ private:
     CCMenu* m_menu = nullptr;
     CCLabelBMFont* m_status = nullptr;
     CCLabelBMFont* m_queueLabel = nullptr;
+    std::string m_splashFor;
 };
 
 namespace sorrow::duels {

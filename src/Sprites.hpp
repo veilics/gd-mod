@@ -80,6 +80,8 @@ inline void ensureSprites() {
         "RL_listBorderBottom_001.png", "RL_listBorderBottom_002.png",
         "RL_listBorderSide_001.png", "RL_listBorderTop_001.png", "RL_listBorderTop_002.png",
         "glimmer.png",
+        "trophy_bronze.png", "trophy_silver.png", "trophy_gold.png",
+        "trophy_platinum.png", "trophy_diamond.png", "trophy_champion.png",
     }) registerSpriteFrame(name);
 }
 
